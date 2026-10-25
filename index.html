@@ -272,6 +272,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
         </div>
         <div class="seg" role="group" aria-label="Ordre des cartons">
           <button type="button" id="sortAdd" aria-pressed="true">Ordre d'ajout</button>
+          <button type="button" id="sortName" aria-pressed="false">Par nom</button>
           <button type="button" id="sortBest" aria-pressed="false">Plus avancés</button>
         </div>
       </div>
@@ -584,6 +585,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     const list = state.cards.map((c, i) => ({ c, i, p: cardProgress(c, drawnSet) }));
     if (sortMode === "best") {
       list.sort((a, b) => !!a.c.off - !!b.c.off || b.p.level - a.p.level || a.p.near - b.p.near || b.p.hits - a.p.hits || a.i - b.i);
+    } else if (sortMode === "name") {
+      // Tri alphabétique « naturel » : Carton 2 avant Carton 10
+      list.sort((a, b) => (a.c.name || "").localeCompare(b.c.name || "", "fr", { numeric: true, sensitivity: "base" }) || a.i - b.i);
     }
     const box = $("cards");
     if (!state.cards.length) {
@@ -897,14 +901,13 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   // ---------- Tri ----------
   function setSort(m) {
     sortMode = m;
-    $("sortAdd").setAttribute("aria-pressed", m === "add");
-    $("sortBest").setAttribute("aria-pressed", m === "best");
+    Object.entries(SORT_BTNS).forEach(([k, id]) => $(id).setAttribute("aria-pressed", m === k));
     try { localStorage.setItem(LS_SORT, m); } catch (e) {}
     render();
   }
-  $("sortAdd").addEventListener("click", () => setSort("add"));
-  $("sortBest").addEventListener("click", () => setSort("best"));
-  try { if (localStorage.getItem(LS_SORT) === "best") { sortMode = "best"; $("sortAdd").setAttribute("aria-pressed", false); $("sortBest").setAttribute("aria-pressed", true); } } catch (e) {}
+  const SORT_BTNS = { add: "sortAdd", name: "sortName", best: "sortBest" };
+  Object.entries(SORT_BTNS).forEach(([k, id]) => $(id).addEventListener("click", () => setSort(k)));
+  try { const m = localStorage.getItem(LS_SORT); if (m in SORT_BTNS) { sortMode = m; Object.entries(SORT_BTNS).forEach(([k, id]) => $(id).setAttribute("aria-pressed", m === k)); } } catch (e) {}
 
   // ---------- Notifications ----------
   function toast(text, kind = "", ms = 2600) {
