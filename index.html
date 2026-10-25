@@ -104,7 +104,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 @media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
 
 /* Colonne tirage */
-.draw { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 18px; display: grid; gap: 16px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+.draw { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 18px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
 @media (max-width: 900px) { .draw { position: static; } }
 .label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
 
@@ -129,7 +129,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .msg { min-height: 20px; font-size: 13px; color: var(--muted); }
 .msg.bad { color: var(--accent); font-weight: 600; }
 
-.board { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; }
+.board { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 3px; }
 .board button { aspect-ratio: 1; border: 0; border-radius: 6px; background: var(--felt); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 0; color: var(--muted); }
 .board button:hover { background: var(--felt-2); color: var(--fg); }
 .board button.on { background: var(--accent); color: var(--accent-fg); }
@@ -634,14 +634,20 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     }
   }
 
-  function toggleNumber(n) {
-    const i = state.drawn.indexOf(n);
-    if (i >= 0) {
+  function removeNumber(n, verb) {
+    ask(`Retirer le ${n} ?`, `Le ${n} sera retiré des numéros sortis et ses jetons enlevés des cartons.`, "Oui, retirer", () => {
+      const i = state.drawn.indexOf(n);
+      if (i < 0) return;
       state.drawn.splice(i, 1);
       justDrawn = null;
       render(); persist();
-      setMsg(`${n} retiré.`);
-    } else addNumbers([n]);
+      setMsg(`${n} ${verb}.`);
+    });
+  }
+
+  function toggleNumber(n) {
+    if (state.drawn.includes(n)) removeNumber(n, "retiré");
+    else addNumbers([n]);
   }
 
   $("entryForm").addEventListener("submit", (e) => {
@@ -654,12 +660,23 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   });
 
   $("undo").addEventListener("click", () => {
-    const n = state.drawn.pop();
-    if (n === undefined) return;
-    justDrawn = null;
-    render(); persist();
-    setMsg(`${n} annulé.`);
+    const n = state.drawn[state.drawn.length - 1];
+    if (n !== undefined) removeNumber(n, "annulé");
   });
+
+  // Les claviers numériques des téléphones n'ont pas d'espace : toute virgule, point ou autre séparateur devient un espace
+  function spaceSeparators(input) {
+    input.addEventListener("input", () => {
+      const v = input.value;
+      const clean = (s) => s.replace(/\D+/g, " ").replace(/^ /, "");
+      const out = clean(v);
+      if (out === v) return;
+      const caret = clean(v.slice(0, input.selectionStart ?? v.length)).length;
+      input.value = out;
+      input.setSelectionRange(caret, caret);
+    });
+  }
+  ["numIn", "edR0", "edR1", "edR2"].forEach((id) => spaceSeparators($(id)));
 
   // ---------- Confirmation ----------
   let cfAction = null;
