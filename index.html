@@ -136,6 +136,14 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .board button.last { box-shadow: 0 0 0 2px var(--fg); }
 .board-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint { font-size: 12px; color: var(--muted); }
+.recap { display: grid; gap: 8px; }
+.recap-group { border-radius: 10px; padding: 8px 10px; background: var(--felt); font-size: 13px; display: grid; gap: 2px; }
+.recap-group.win { background: var(--win-bg); }
+.recap-group.warn { background: var(--warn-bg); }
+.recap-group strong { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.recap-group.win strong { color: var(--win); }
+.recap-group.warn strong { color: var(--warn); }
+.recap-group b { font-variant-numeric: tabular-nums; }
 
 /* Zone cartons */
 .cards-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -242,6 +250,10 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       <div>
         <div class="label" style="margin-bottom:8px">Tableau des boules</div>
         <div class="board" id="board"></div>
+      </div>
+      <div class="recap" id="recapBox" hidden>
+        <div class="label">Récap des cartons</div>
+        <div class="recap" id="recap"></div>
       </div>
       <div class="board-foot">
         <span class="hint">Cliquez une case pour corriger.</span>
@@ -581,6 +593,50 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     if (oneAway) chips.push(["warn", `${oneAway} à un numéro`]);
     if (!chips.length && state.cards.length) chips.push(["", state.drawn.length ? "Pas encore de quine" : "En attente du premier numéro"]);
     sum.replaceChildren(...chips.map(([k, t]) => { const s = document.createElement("span"); s.className = "chip " + k; s.textContent = t; return s; }));
+
+    // Récap global : cartons à un numéro de la prochaine étape (avec le numéro attendu), puis gains déjà faits
+    const near = { 1: [], 2: [], 3: [] }, won = { 1: [], 2: [], 3: [] };
+    state.cards.forEach((c) => {
+      const p = cardProgress(c, drawnSet);
+      const name = c.name || "Carton";
+      if (p.level) won[p.level].push(name);
+      if (p.level === 3) return;
+      const open = c.rows.filter((r) => r.length && !r.every((n) => drawnSet.has(n)));
+      const waits = open.map((r) => r.filter((n) => !drawnSet.has(n))).filter((m) => m.length === 1).map((m) => m[0]);
+      if (!waits.length) return;
+      near[open.length === 1 ? 3 : p.level + 1].push([name, waits.sort((a, b) => a - b)]);
+    });
+    const groups = [];
+    const group = (kind, title, lines) => {
+      const g = document.createElement("div");
+      g.className = "recap-group " + kind;
+      const h = document.createElement("strong");
+      h.textContent = title;
+      g.append(h, ...lines);
+      groups.push(g);
+    };
+    [3, 2, 1].forEach((lv) => {
+      if (!near[lv].length) return;
+      group("warn", `À un numéro ${lv === 3 ? "du carton plein" : lv === 2 ? "de la double quine" : "de la quine"}`, near[lv].map(([name, waits]) => {
+        const d = document.createElement("div");
+        d.append(name + " · attend ");
+        waits.forEach((n, i) => { if (i) d.append(" ou "); const b = document.createElement("b"); b.textContent = n; d.append(b); });
+        return d;
+      }));
+    });
+    [3, 2, 1].forEach((lv) => {
+      if (!won[lv].length) return;
+      const d = document.createElement("div");
+      d.textContent = won[lv].join(", ");
+      group("win", `${LEVELS[lv]} (${won[lv].length})`, [d]);
+    });
+    if (!groups.length) {
+      const d = document.createElement("div");
+      d.textContent = state.drawn.length ? "Aucun carton à un numéro pour l'instant." : "En attente du premier numéro.";
+      group("", "Rien à signaler", [d]);
+    }
+    $("recap").replaceChildren(...groups);
+    $("recapBox").hidden = !state.cards.length;
 
     $("newGame").disabled = !state.drawn.length;
     $("clearCards").disabled = !state.cards.length;
