@@ -623,9 +623,16 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     if (added.length) {
       justDrawn = added[added.length - 1];
       render(); persist(); announceWins(before);
-      // Pour chaque numéro : combien de jetons posés, et sur quels cartons
+      // Pour chaque numéro : combien de jetons posés, sur quels cartons, et les quines gagnées
+      const set = new Set(state.drawn.filter((n) => !added.includes(n)));
       const lines = added.map((n) => {
-        const names = state.cards.filter((c) => c.rows.some((r) => r.includes(n))).map((c) => c.name || "Carton");
+        const hit = state.cards.filter((c) => c.rows.some((r) => r.includes(n)));
+        const lvBefore = hit.map((c) => cardProgress(c, set).level);
+        set.add(n);
+        const names = hit.map((c, i) => {
+          const lv = cardProgress(c, set).level;
+          return (c.name || "Carton") + (lv > lvBefore[i] ? ` → ${LEVELS[lv].toUpperCase()} !` : "");
+        });
         if (!names.length) return `${n} : aucun jeton, absent de vos cartons`;
         return `${n} : ${names.length} jeton${names.length > 1 ? "s" : ""} placé${names.length > 1 ? "s" : ""} · ${names.join(", ")}`;
       });
