@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Entrez vos cartons de loto, annoncez les numéros : les jetons se placent tout seuls.">
+<meta name="theme-color" content="#12241a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23f3efe6'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='%23b3261e' stroke-width='4'/%3E%3Ctext x='32' y='42' font-size='26' text-anchor='middle' font-family='Georgia' font-weight='bold' fill='%231a1a1a'%3E90%3C/text%3E%3C/svg%3E">
+<title>Loto de la salle des fêtes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: tapis de jeu — colonne « tirage » collante à gauche, cartons en grille à droite ; une seule colonne sur téléphone */
+:root {
+  --felt: #e6ebe4;
+  --felt-2: #d7dfd4;
+  --panel: #f7f9f5;
+  --fg: #1d2a22;
+  --muted: #5c6b61;
+  --line: #c3ccbf;
+  --accent: #b3261e;        /* rouge jeton */
+  --accent-fg: #ffffff;
+  --token: rgba(196, 30, 36, .62);
+  --token-ring: rgba(140, 14, 20, .85);
+  --ink: #1a1a1a;           /* encre imprimée sur les cartons */
+  --win: #1f7a3a;
+  --win-bg: #d9f0df;
+  --warn: #8a5a00;
+  --warn-bg: #fbeccb;
+  --shadow: 0 1px 2px rgba(20, 40, 25, .12), 0 6px 18px rgba(20, 40, 25, .10);
+  --c-jaune: #f6dc6b;
+  --c-rose: #f4b6c4;
+  --c-bleu: #a9cdee;
+  --c-vert: #b5e0a8;
+  --c-orange: #f7be86;
+  --c-lilas: #cdb9ec;
+  --font-display: "Alfa Slab One", "Rockwell", "Roboto Slab", Georgia, serif;
+  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --felt: #12241a; --felt-2: #0d1c14; --panel: #1a2f22; --fg: #e8efe9; --muted: #9fb2a5; --line: #2f4a39;
+    --accent: #e0483f; --accent-fg: #ffffff; --token: rgba(214, 38, 44, .66); --token-ring: rgba(120, 8, 14, .9);
+    --ink: #161616; --win: #7fd99a; --win-bg: #173a24; --warn: #f2c46b; --warn-bg: #3a2e12;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
+    --c-jaune: #e7cc5c; --c-rose: #e3a3b3; --c-bleu: #97bde0; --c-vert: #a2cf95; --c-orange: #e8ad74; --c-lilas: #bba7dc;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --felt: #12241a; --felt-2: #0d1c14; --panel: #1a2f22; --fg: #e8efe9; --muted: #9fb2a5; --line: #2f4a39;
+  --accent: #e0483f; --accent-fg: #ffffff; --token: rgba(214, 38, 44, .66); --token-ring: rgba(120, 8, 14, .9);
+  --ink: #161616; --win: #7fd99a; --win-bg: #173a24; --warn: #f2c46b; --warn-bg: #3a2e12;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 22px rgba(0,0,0,.35);
+  --c-jaune: #e7cc5c; --c-rose: #e3a3b3; --c-bleu: #97bde0; --c-vert: #a2cf95; --c-orange: #e8ad74; --c-lilas: #bba7dc;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--felt);
+  background-image: radial-gradient(circle at 1px 1px, var(--felt-2) 1px, transparent 0);
+  background-size: 6px 6px;
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1400px; margin: 0 auto; display: grid; gap: 20px; }
+
+/* En-tête */
+header.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; }
+.brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.brand h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(30px, 5vw, 44px); line-height: 1; margin: 0; letter-spacing: .5px; text-wrap: balance; }
+.brand h1 span { color: var(--accent); }
+.sync { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; display: inline-flex; align-items: center; gap: 6px; }
+.sync::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync.ok::before { background: var(--win); }
+.sync.err::before { background: var(--accent); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 9px 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; transition: transform .08s, background .15s; }
+.btn:hover { background: var(--felt-2); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { filter: brightness(1.08); background: var(--accent); }
+.btn.danger { color: var(--accent); border-color: var(--accent); background: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; }
+.btn.ghost:hover { background: var(--felt-2); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.app { display: grid; grid-template-columns: minmax(300px, 370px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+/* Colonne tirage */
+.draw { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 18px; display: grid; gap: 16px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+@media (max-width: 900px) { .draw { position: static; } }
+.label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+
+.ball-row { display: flex; align-items: center; gap: 16px; }
+.ball { width: 96px; height: 96px; flex: none; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #fff 0 18%, #f3efe6 40%, #d9d2c2 100%);
+  box-shadow: inset -6px -8px 14px rgba(0,0,0,.18), 0 4px 10px rgba(0,0,0,.2);
+  font-family: var(--font-display); font-size: 40px; color: #1a1a1a; position: relative; }
+.ball::after { content: ""; position: absolute; inset: 14px; border-radius: 50%; border: 3px solid var(--accent); opacity: .9; }
+.ball.empty { color: #9a9488; font-size: 28px; }
+.ball.pop { animation: pop .45s cubic-bezier(.2,1.6,.4,1); }
+@keyframes pop { from { transform: scale(.4) rotate(-40deg); } to { transform: scale(1) rotate(0); } }
+.ball-meta { display: grid; gap: 4px; min-width: 0; }
+.ball-meta strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.recent { display: flex; gap: 6px; flex-wrap: wrap; }
+.recent span { min-width: 30px; height: 30px; padding: 0 6px; border-radius: 15px; display: grid; place-items: center; background: var(--felt-2); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.entry { display: flex; gap: 8px; }
+.entry input { flex: 1; min-width: 0; border: 2px solid var(--line); border-radius: 12px; background: var(--felt); padding: 10px 14px; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.entry input:focus { border-color: var(--accent); outline: none; }
+.entry .btn { font-size: 16px; }
+.msg { min-height: 20px; font-size: 13px; color: var(--muted); }
+.msg.bad { color: var(--accent); font-weight: 600; }
+
+.board { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; }
+.board button { aspect-ratio: 1; border: 0; border-radius: 6px; background: var(--felt); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 0; color: var(--muted); }
+.board button:hover { background: var(--felt-2); color: var(--fg); }
+.board button.on { background: var(--accent); color: var(--accent-fg); }
+.board button.last { box-shadow: 0 0 0 2px var(--fg); }
+.board-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hint { font-size: 12px; color: var(--muted); }
+
+/* Zone cartons */
+.cards-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.cards-head h2 { margin: 0; font-size: 18px; }
+.summary { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
+.chip.win { background: var(--win-bg); color: var(--win); border-color: transparent; }
+.chip.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.seg button { border: 0; background: transparent; padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--felt); }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 18px; }
+
+.carton { --stock: var(--c-jaune); background: var(--stock); border-radius: 10px; padding: 10px 10px 8px; box-shadow: var(--shadow); color: var(--ink); container-type: inline-size; position: relative; transition: transform .2s; }
+.carton.flash { animation: flash 1.2s ease; }
+@keyframes flash { 0%,100% { transform: none; } 20% { transform: scale(1.03) rotate(-.6deg); } 40% { transform: scale(1.03) rotate(.6deg); } }
+.carton-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; padding-inline: 2px; }
+.carton-name { font-family: var(--font-display); font-size: 16px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.carton-edit { border: 0; background: rgba(0,0,0,.08); color: var(--ink); border-radius: 8px; padding: 4px 9px; font-size: 12px; font-weight: 700; flex: none; }
+.carton-edit:hover { background: rgba(0,0,0,.16); }
+.cells { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; background: rgba(0,0,0,.55); border: 2px solid rgba(0,0,0,.55); border-radius: 4px; overflow: hidden; }
+.cell { aspect-ratio: 1 / 1.08; background: #fffdf7; display: grid; place-items: center; font-family: var(--font-display); font-size: 6.4cqi; color: var(--ink); position: relative; font-variant-numeric: tabular-nums; }
+.cell.blank { background: color-mix(in srgb, var(--stock) 80%, #000 6%); background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.06) 4px 5px); }
+.cell.hit::after { content: ""; position: absolute; inset: 8%; border-radius: 50%; background: radial-gradient(circle at 38% 32%, rgba(255,255,255,.45) 0 12%, var(--token) 40%); box-shadow: inset 0 0 0 2px var(--token-ring); animation: drop .3s cubic-bezier(.2,1.5,.4,1); }
+.cell.just::after { box-shadow: inset 0 0 0 2px var(--token-ring), 0 0 0 3px #fff, 0 0 0 5px var(--token-ring); }
+@keyframes drop { from { transform: scale(1.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.row-done .cell:not(.blank) { background: #fff3c4; }
+.carton-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 7px; padding-inline: 2px; font-size: 12px; font-weight: 600; min-height: 22px; }
+.badge { padding: 2px 9px; border-radius: 999px; font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; background: var(--ink); color: #fff; }
+.badge.full { background: #b3261e; }
+.near { color: rgba(0,0,0,.65); }
+.near.hot { color: #8c0e14; font-weight: 800; }
+
+.empty { border: 2px dashed var(--line); border-radius: 16px; padding: 36px 20px; text-align: center; display: grid; gap: 12px; justify-items: center; background: var(--panel); }
+.empty h3 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 22px; }
+.empty p { margin: 0; color: var(--muted); max-width: 46ch; }
+
+/* Fenêtres */
+.overlay { position: fixed; inset: 0; background: rgba(5, 15, 10, .55); display: grid; place-items: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); z-index: 50; }
+.modal { background: var(--panel); color: var(--fg); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.4); width: min(640px, 100%); max-height: 100%; overflow: auto; padding: 22px; display: grid; gap: 16px; }
+.modal.small { width: min(440px, 100%); }
+.modal h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 24px; }
+.modal p { margin: 0; color: var(--muted); }
+.modal-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.modal-actions .spacer { flex: 1; }
+.field { display: grid; gap: 6px; }
+.field input[type="text"] { border: 2px solid var(--line); border-radius: 10px; background: var(--felt); padding: 9px 12px; font-size: 16px; font-variant-numeric: tabular-nums; }
+.field input[type="text"]:focus { border-color: var(--accent); outline: none; }
+.rows { display: grid; gap: 8px; }
+.row-in { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: center; }
+.row-in span { font-size: 13px; font-weight: 700; color: var(--muted); }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatches button { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.swatches button[aria-pressed="true"] { border-color: var(--fg); transform: scale(1.1); }
+.errors { color: var(--accent); font-size: 13px; font-weight: 600; margin: 0; padding-left: 18px; }
+.errors:empty { display: none; }
+.preview-wrap { max-width: 420px; }
+
+.toast-box { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); display: grid; gap: 8px; z-index: 60; width: min(440px, calc(100% - 32px)); }
+.toast { background: var(--fg); color: var(--felt); padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-weight: 600; animation: rise .3s ease; }
+.toast.win { background: var(--accent); color: var(--accent-fg); font-size: 17px; }
+@keyframes rise { from { transform: translateY(20px); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>Loto<span>.</span></h1>
+      <span class="sync" id="sync">Chargement…</span>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="addCard" type="button">+ Ajouter un carton</button>
+      <button class="btn" id="newGame" type="button">Nouvelle partie</button>
+      <button class="btn danger" id="clearCards" type="button">Supprimer les cartons</button>
+      <button class="btn ghost" id="exportBtn" type="button">Exporter</button>
+      <button class="btn ghost" id="importBtn" type="button">Importer</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <div class="app">
+    <aside class="draw" aria-label="Tirage">
+      <div class="ball-row">
+        <div class="ball empty" id="ball">–</div>
+        <div class="ball-meta">
+          <span class="label">Dernier numéro</span>
+          <strong id="count">0 / 90 sortis</strong>
+          <div class="recent" id="recent"></div>
+        </div>
+      </div>
+
+      <form class="entry" id="entryForm" autocomplete="off">
+        <input id="numIn" type="text" inputmode="numeric" placeholder="Numéro annoncé" aria-label="Numéro annoncé">
+        <button class="btn primary" type="submit">Placer</button>
+      </form>
+      <div class="msg" id="msg">Tapez le numéro puis Entrée. Plusieurs à la fois : « 12 45 7 ».</div>
+
+      <div>
+        <div class="label" style="margin-bottom:8px">Tableau des boules</div>
+        <div class="board" id="board"></div>
+      </div>
+      <div class="board-foot">
+        <span class="hint">Cliquez une case pour corriger.</span>
+        <button class="btn ghost" id="undo" type="button">↶ Annuler le dernier</button>
+      </div>
+    </aside>
+
+    <main>
+      <div class="cards-head">
+        <div style="display:grid;gap:6px">
+          <h2 id="cardsTitle">Cartons</h2>
+          <div class="summary" id="summary"></div>
+        </div>
+        <div class="seg" role="group" aria-label="Ordre des cartons">
+          <button type="button" id="sortAdd" aria-pressed="true">Ordre d'ajout</button>
+          <button type="button" id="sortBest" aria-pressed="false">Plus avancés</button>
+        </div>
+      </div>
+      <div id="cards"></div>
+    </main>
+  </div>
+</div>
+
+<div class="overlay" id="editor" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+    <h2 id="edTitle">Nouveau carton</h2>
+    <div class="field">
+      <label class="label" for="edName">Nom du carton</label>
+      <input type="text" id="edName" placeholder="Ex. Carton de Mamie n°2">
+    </div>
+    <div class="field">
+      <span class="label">Couleur</span>
+      <div class="swatches" id="edColors"></div>
+    </div>
+    <div class="field">
+      <span class="label">Numéros, ligne par ligne</span>
+      <div class="rows">
+        <label class="row-in"><span>Ligne 1</span><input type="text" id="edR0" inputmode="numeric" placeholder="ex. 4 17 35 52 81"></label>
+        <label class="row-in"><span>Ligne 2</span><input type="text" id="edR1" inputmode="numeric" placeholder="ex. 9 23 44 68 90"></label>
+        <label class="row-in"><span>Ligne 3</span><input type="text" id="edR2" inputmode="numeric" placeholder="ex. 12 30 57 63 76"></label>
+      </div>
+      <span class="hint">Séparez par des espaces ou des virgules. Chaque numéro se range seul dans sa colonne (1‑9, 10‑19 … 80‑90).</span>
+    </div>
+    <ul class="errors" id="edErrors"></ul>
+    <div class="field">
+      <span class="label">Aperçu</span>
+      <div class="preview-wrap" id="edPreview"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" type="button" id="edDelete" hidden>Supprimer</button>
+      <button class="btn ghost" type="button" id="edRandom">Remplir au hasard</button>
+      <span class="spacer"></span>
+      <button class="btn" type="button" id="edCancel">Annuler</button>
+      <button class="btn" type="button" id="edSaveMore">Enregistrer + autre</button>
+      <button class="btn primary" type="button" id="edSave">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="confirm" hidden>
+  <div class="modal small" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle" aria-describedby="cfText">
+    <h2 id="cfTitle"></h2>
+    <p id="cfText"></p>
+    <div class="modal-actions">
+      <button class="btn" type="button" id="cfNo">Annuler</button>
+      <button class="btn primary" type="button" id="cfYes"></button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-box" id="toasts" aria-live="polite"></div>
+
+<script>
+(() => {
+  const COLORS = ["jaune", "rose", "bleu", "vert", "orange", "lilas"];
+  const LEVELS = ["", "Quine", "Double quine", "Carton plein"];
+  const LS_KEY = "loto-state-v1";
+  const LS_SORT = "loto-sort";
+  const $ = (id) => document.getElementById(id);
+
+  let state = { cards: [], drawn: [] };
+  let sortMode = "add";
+  let justDrawn = null;
+
+  // ---------- Persistance (sur cet appareil uniquement) ----------
+  function loadLocal() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LS_KEY));
+      if (s && Array.isArray(s.cards) && Array.isArray(s.drawn)) return s;
+    } catch (e) {}
+    return null;
+  }
+  function setSync(kind, text) {
+    const el = $("sync");
+    el.className = "sync " + kind;
+    el.textContent = text;
+  }
+  function persist() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      setSync("ok", "Enregistré sur cet appareil");
+    } catch (e) {
+      setSync("err", "Enregistrement impossible (navigation privée ?)");
+    }
+  }
+  function connect() {
+    const local = loadLocal();
+    if (local) { state = local; render(); }
+    try { localStorage.setItem(LS_KEY + "-test", "1"); localStorage.removeItem(LS_KEY + "-test"); setSync("ok", "Enregistré sur cet appareil"); }
+    catch (e) { setSync("err", "Enregistrement impossible (navigation privée ?)"); }
+    // Garde plusieurs onglets du même appareil d'accord
+    window.addEventListener("storage", (e) => {
+      if (e.key !== LS_KEY) return;
+      const s = loadLocal();
+      if (s) { state = s; justDrawn = null; render(); }
+    });
+  }
+
+  // ---------- Export / import ----------
+  function isValidState(s) {
+    return s && Array.isArray(s.cards) && Array.isArray(s.drawn) &&
+      s.cards.every((c) => c && Array.isArray(c.rows) && c.rows.length === 3 && c.rows.every((r) => Array.isArray(r) && r.every((n) => Number.isInteger(n) && n >= 1 && n <= 90))) &&
+      s.drawn.every((n) => Number.isInteger(n) && n >= 1 && n <= 90);
+  }
+  function exportCards() {
+    const data = JSON.stringify({ app: "loto", version: 1, exportedAt: new Date().toISOString(), cards: state.cards, drawn: state.drawn }, null, 2);
+    const url = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "mes-cartons-loto-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Fichier de sauvegarde téléchargé");
+  }
+  function importCards(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(reader.result); } catch (e) { data = null; }
+      if (!isValidState(data)) { toast("Ce fichier n'est pas une sauvegarde de cartons valide."); return; }
+      const cards = data.cards.map((c, i) => ({ id: c.id || uid(), name: String(c.name || "Carton " + (i + 1)), color: COLORS.includes(c.color) ? c.color : COLORS[i % COLORS.length], rows: c.rows }));
+      ask("Importer ces cartons ?",
+        `Le fichier contient ${cards.length} carton${cards.length > 1 ? "s" : ""}. Ils remplaceront les ${state.cards.length} cartons actuels de cet appareil.`,
+        "Importer",
+        () => { state = { cards, drawn: data.drawn.slice() }; justDrawn = null; render(); persist(); toast("Cartons importés"); });
+    };
+    reader.readAsText(file);
+  }
+
+  // ---------- Logique du carton ----------
+  const colOf = (n) => (n === 90 ? 8 : Math.floor(n / 10));
+  const uid = () => Math.random().toString(36).slice(2, 10);
+
+  function cardProgress(card, drawnSet) {
+    const rows = card.rows.map((r) => {
+      const hit = r.filter((n) => drawnSet.has(n)).length;
+      return { total: r.length, hit, done: r.length > 0 && hit === r.length };
+    });
+    const real = rows.filter((r) => r.total > 0);
+    const doneCount = real.filter((r) => r.done).length;
+    const level = real.length && doneCount === real.length ? 3 : Math.min(doneCount, 2);
+    const remaining = real.filter((r) => !r.done).map((r) => r.total - r.hit);
+    const near = remaining.length ? Math.min(...remaining) : 0;
+    const hits = rows.reduce((a, r) => a + r.hit, 0);
+    const total = rows.reduce((a, r) => a + r.total, 0);
+    return { rows, level, near, hits, total };
+  }
+
+  function parseRow(text) {
+    return (text.match(/\d+/g) || []).map(Number);
+  }
+
+  function validate(rows) {
+    const errs = [];
+    const seen = new Set();
+    rows.forEach((r, i) => {
+      const cols = new Set();
+      r.forEach((n) => {
+        if (!Number.isInteger(n) || n < 1 || n > 90) { errs.push(`Ligne ${i + 1} : ${n} n'est pas entre 1 et 90.`); return; }
+        if (seen.has(n)) errs.push(`Le ${n} apparaît deux fois.`);
+        seen.add(n);
+        const c = colOf(n);
+        if (cols.has(c)) errs.push(`Ligne ${i + 1} : deux numéros dans la même colonne (${c === 0 ? "1‑9" : c * 10 + "‑" + (c === 8 ? 90 : c * 10 + 9)}).`);
+        cols.add(c);
+      });
+    });
+    if (!seen.size) errs.push("Entrez au moins un numéro.");
+    return [...new Set(errs)];
+  }
+
+  function randomRows() {
+    const used = new Set();
+    return [0, 1, 2].map(() => {
+      const cols = [...Array(9).keys()].sort(() => Math.random() - .5).slice(0, 5).sort((a, b) => a - b);
+      return cols.map((c) => {
+        const lo = c === 0 ? 1 : c * 10, hi = c === 8 ? 90 : c * 10 + 9;
+        let n;
+        do { n = lo + Math.floor(Math.random() * (hi - lo + 1)); } while (used.has(n));
+        used.add(n);
+        return n;
+      });
+    });
+  }
+
+  // ---------- Rendu ----------
+  function cartonEl(card, drawnSet, opts = {}) {
+    const p = cardProgress(card, drawnSet);
+    const el = document.createElement("article");
+    el.className = "carton";
+    el.dataset.id = card.id || "";
+    el.style.setProperty("--stock", `var(--c-${COLORS.includes(card.color) ? card.color : "jaune"})`);
+
+    const top = document.createElement("div");
+    top.className = "carton-top";
+    const name = document.createElement("div");
+    name.className = "carton-name";
+    name.textContent = card.name || "Carton";
+    top.appendChild(name);
+    if (!opts.preview) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "carton-edit";
+      b.textContent = "Modifier";
+      b.addEventListener("click", () => openEditor(card));
+      top.appendChild(b);
+    }
+    el.appendChild(top);
+
+    const cells = document.createElement("div");
+    cells.className = "cells";
+    card.rows.forEach((r, ri) => {
+      const byCol = Array(9).fill(null);
+      r.forEach((n) => { byCol[colOf(n)] = n; });
+      byCol.forEach((n) => {
+        const c = document.createElement("div");
+        c.className = "cell";
+        if (n === null) c.classList.add("blank");
+        else {
+          c.textContent = n;
+          if (drawnSet.has(n)) c.classList.add("hit");
+          if (n === justDrawn) c.classList.add("just");
+          if (p.rows[ri].done) c.style.background = "#fff3c4";
+        }
+        cells.appendChild(c);
+      });
+    });
+    el.appendChild(cells);
+
+    if (!opts.preview) {
+      const foot = document.createElement("div");
+      foot.className = "carton-foot";
+      const left = document.createElement("span");
+      if (p.level) {
+        left.className = "badge" + (p.level === 3 ? " full" : "");
+        left.textContent = LEVELS[p.level];
+      } else {
+        left.textContent = `${p.hits} / ${p.total} jetons`;
+      }
+      const right = document.createElement("span");
+      if (p.level < 3 && p.near) {
+        right.className = "near" + (p.near === 1 ? " hot" : "");
+        right.textContent = p.near === 1 ? "Plus qu'un pour " + LEVELS[p.level + 1].toLowerCase() + " !" : `Il en manque ${p.near} sur une ligne`;
+      } else if (p.level === 3) {
+        right.className = "near hot";
+        right.textContent = "Carton !";
+      }
+      foot.append(left, right);
+      el.appendChild(foot);
+    }
+    return el;
+  }
+
+  function render() {
+    const drawnSet = new Set(state.drawn);
+    const last = state.drawn[state.drawn.length - 1];
+
+    const ball = $("ball");
+    const prev = ball.textContent;
+    ball.textContent = last ?? "–";
+    ball.classList.toggle("empty", last === undefined);
+    if (last !== undefined && String(last) !== prev) {
+      ball.classList.remove("pop"); void ball.offsetWidth; ball.classList.add("pop");
+    }
+    $("count").textContent = `${state.drawn.length} / 90 sortis`;
+    const recent = $("recent");
+    recent.replaceChildren(...state.drawn.slice(-7, -1).reverse().map((n) => {
+      const s = document.createElement("span"); s.textContent = n; return s;
+    }));
+    $("undo").disabled = !state.drawn.length;
+
+    const board = $("board");
+    if (!board.children.length) {
+      for (let n = 1; n <= 90; n++) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = n;
+        b.dataset.n = n;
+        b.addEventListener("click", () => toggleNumber(n));
+        board.appendChild(b);
+      }
+    }
+    [...board.children].forEach((b) => {
+      const n = +b.dataset.n;
+      const on = drawnSet.has(n);
+      b.classList.toggle("on", on);
+      b.classList.toggle("last", n === last);
+      b.setAttribute("aria-pressed", on);
+      b.setAttribute("aria-label", `${n}${on ? ", sorti" : ""}`);
+    });
+
+    // Cartons
+    const list = state.cards.map((c, i) => ({ c, i, p: cardProgress(c, drawnSet) }));
+    if (sortMode === "best") {
+      list.sort((a, b) => b.p.level - a.p.level || a.p.near - b.p.near || b.p.hits - a.p.hits || a.i - b.i);
+    }
+    const box = $("cards");
+    if (!state.cards.length) {
+      box.innerHTML = `<div class="empty"><h3>Aucun carton pour l'instant</h3>
+        <p>Ajoutez vos cartons en recopiant leurs numéros ligne par ligne. Ils restent enregistrés sur cet appareil d'une partie à l'autre.</p>
+        <button class="btn primary" type="button" id="emptyAdd">+ Ajouter mon premier carton</button></div>`;
+      $("emptyAdd").addEventListener("click", () => openEditor());
+    } else {
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      list.forEach(({ c }) => grid.appendChild(cartonEl(c, drawnSet)));
+      box.replaceChildren(grid);
+    }
+
+    $("cardsTitle").textContent = state.cards.length ? `${state.cards.length} carton${state.cards.length > 1 ? "s" : ""}` : "Cartons";
+    const sum = $("summary");
+    const counts = [0, 0, 0, 0]; let oneAway = 0;
+    list.forEach(({ p }) => { counts[p.level]++; if (p.level < 3 && p.near === 1) oneAway++; });
+    const chips = [];
+    if (counts[3]) chips.push(["win", `${counts[3]} carton plein`]);
+    if (counts[2]) chips.push(["win", `${counts[2]} double quine`]);
+    if (counts[1]) chips.push(["win", `${counts[1]} quine`]);
+    if (oneAway) chips.push(["warn", `${oneAway} à un numéro`]);
+    if (!chips.length && state.cards.length) chips.push(["", state.drawn.length ? "Pas encore de quine" : "En attente du premier numéro"]);
+    sum.replaceChildren(...chips.map(([k, t]) => { const s = document.createElement("span"); s.className = "chip " + k; s.textContent = t; return s; }));
+
+    $("newGame").disabled = !state.drawn.length;
+    $("clearCards").disabled = !state.cards.length;
+    $("exportBtn").disabled = !state.cards.length;
+  }
+
+  // ---------- Tirage ----------
+  function levels() {
+    const set = new Set(state.drawn);
+    return new Map(state.cards.map((c) => [c.id, cardProgress(c, set).level]));
+  }
+  function announceWins(before) {
+    const after = levels();
+    state.cards.forEach((c) => {
+      const a = after.get(c.id), b = before.get(c.id) || 0;
+      if (a > b) {
+        toast(`${LEVELS[a]} ! · ${c.name || "Carton"}`, "win", 6000);
+        requestAnimationFrame(() => {
+          const el = document.querySelector(`.carton[data-id="${CSS.escape(c.id)}"]`);
+          if (el) { el.classList.add("flash"); el.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+        });
+      }
+    });
+  }
+
+  function setMsg(text, bad) {
+    const m = $("msg");
+    m.textContent = text;
+    m.classList.toggle("bad", !!bad);
+  }
+
+  function addNumbers(nums) {
+    const before = levels();
+    const added = [], dup = [], bad = [];
+    nums.forEach((n) => {
+      if (!Number.isInteger(n) || n < 1 || n > 90) bad.push(n);
+      else if (state.drawn.includes(n)) dup.push(n);
+      else { state.drawn.push(n); added.push(n); }
+    });
+    if (added.length) {
+      justDrawn = added[added.length - 1];
+      render(); persist(); announceWins(before);
+      const onCards = added.filter((n) => state.cards.some((c) => c.rows.some((r) => r.includes(n))));
+      setMsg(`${added.join(", ")} placé${added.length > 1 ? "s" : ""}` + (onCards.length ? ` · sur vos cartons : ${onCards.join(", ")}` : " · sur aucun carton"));
+    }
+    if (dup.length || bad.length) {
+      const parts = [];
+      if (dup.length) parts.push(`${dup.join(", ")} déjà sorti${dup.length > 1 ? "s" : ""}`);
+      if (bad.length) parts.push(`${bad.join(", ")} hors de 1 à 90`);
+      setMsg((added.length ? $("msg").textContent + " · " : "") + parts.join(" · "), true);
+    }
+  }
+
+  function toggleNumber(n) {
+    const i = state.drawn.indexOf(n);
+    if (i >= 0) {
+      state.drawn.splice(i, 1);
+      justDrawn = null;
+      render(); persist();
+      setMsg(`${n} retiré.`);
+    } else addNumbers([n]);
+  }
+
+  $("entryForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const nums = ($("numIn").value.match(/\d+/g) || []).map(Number);
+    if (!nums.length) { setMsg("Tapez un numéro entre 1 et 90.", true); return; }
+    addNumbers(nums);
+    $("numIn").value = "";
+    $("numIn").focus();
+  });
+
+  $("undo").addEventListener("click", () => {
+    const n = state.drawn.pop();
+    if (n === undefined) return;
+    justDrawn = null;
+    render(); persist();
+    setMsg(`${n} annulé.`);
+  });
+
+  // ---------- Confirmation ----------
+  let cfAction = null;
+  function ask(title, text, yesLabel, action) {
+    $("cfTitle").textContent = title;
+    $("cfText").textContent = text;
+    $("cfYes").textContent = yesLabel;
+    cfAction = action;
+    $("confirm").hidden = false;
+    $("cfNo").focus();
+  }
+  function closeConfirm() { $("confirm").hidden = true; cfAction = null; }
+  $("cfNo").addEventListener("click", closeConfirm);
+  $("cfYes").addEventListener("click", () => { const a = cfAction; closeConfirm(); if (a) a(); });
+
+  $("newGame").addEventListener("click", () => ask(
+    "Commencer une nouvelle partie ?",
+    `Les ${state.drawn.length} numéros sortis et tous les jetons seront retirés. Vos cartons restent enregistrés.`,
+    "Oui, nouvelle partie",
+    () => { state.drawn = []; justDrawn = null; render(); persist(); setMsg("Nouvelle partie : les cartons sont vides."); toast("Nouvelle partie prête"); }
+  ));
+  $("clearCards").addEventListener("click", () => ask(
+    "Supprimer tous les cartons ?",
+    `Les ${state.cards.length} cartons enregistrés seront effacés, ainsi que les numéros sortis. Cette action est définitive.`,
+    "Tout supprimer",
+    () => { state.cards = []; state.drawn = []; justDrawn = null; render(); persist(); toast("Cartons supprimés"); }
+  ));
+
+  // ---------- Éditeur ----------
+  let editing = null, edColor = COLORS[0];
+
+  function edRows() { return [0, 1, 2].map((i) => parseRow($("edR" + i).value)); }
+  function edUpdate() {
+    const rows = edRows();
+    const errs = rows.some((r) => r.length) ? validate(rows) : [];
+    $("edErrors").replaceChildren(...errs.map((t) => { const li = document.createElement("li"); li.textContent = t; return li; }));
+    const okRows = rows.map((r) => r.filter((n) => n >= 1 && n <= 90));
+    const preview = { name: $("edName").value || "Aperçu", color: edColor, rows: okRows };
+    $("edPreview").replaceChildren(cartonEl(preview, new Set(), { preview: true }));
+    [...$("edColors").children].forEach((b) => b.setAttribute("aria-pressed", b.dataset.c === edColor));
+  }
+
+  COLORS.forEach((c) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.c = c;
+    b.style.background = `var(--c-${c})`;
+    b.setAttribute("aria-label", c);
+    b.addEventListener("click", () => { edColor = c; edUpdate(); });
+    $("edColors").appendChild(b);
+  });
+
+  function openEditor(card) {
+    editing = card || null;
+    $("edTitle").textContent = card ? "Modifier le carton" : "Nouveau carton";
+    $("edName").value = card ? card.name : `Carton ${state.cards.length + 1}`;
+    edColor = card ? card.color : COLORS[state.cards.length % COLORS.length];
+    [0, 1, 2].forEach((i) => { $("edR" + i).value = card ? card.rows[i].join(" ") : ""; });
+    $("edDelete").hidden = !card;
+    $("edSaveMore").hidden = !!card;
+    $("editor").hidden = false;
+    edUpdate();
+    $(card ? "edName" : "edR0").focus();
+  }
+  function closeEditor() { $("editor").hidden = true; editing = null; }
+
+  function saveEditor(more) {
+    const rows = edRows().map((r) => r.slice().sort((a, b) => a - b));
+    const errs = validate(rows);
+    if (errs.length) { edUpdate(); $("edErrors").replaceChildren(...errs.map((t) => { const li = document.createElement("li"); li.textContent = t; return li; })); return; }
+    const name = $("edName").value.trim() || `Carton ${state.cards.length + 1}`;
+    const before = levels();
+    if (editing) {
+      const c = state.cards.find((x) => x.id === editing.id);
+      if (c) Object.assign(c, { name, color: edColor, rows });
+    } else {
+      state.cards.push({ id: uid(), name, color: edColor, rows });
+    }
+    render(); persist(); announceWins(before);
+    toast(editing ? "Carton modifié" : `${name} ajouté`);
+    if (more) openEditor(); else closeEditor();
+  }
+
+  ["edName", "edR0", "edR1", "edR2"].forEach((id) => $(id).addEventListener("input", edUpdate));
+  ["edR0", "edR1", "edR2"].forEach((id, i) => $(id).addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); if (i < 2) $("edR" + (i + 1)).focus(); else saveEditor(false); }
+  }));
+  $("edRandom").addEventListener("click", () => {
+    randomRows().forEach((r, i) => { $("edR" + i).value = r.join(" "); });
+    edUpdate();
+  });
+  $("edCancel").addEventListener("click", closeEditor);
+  $("edSave").addEventListener("click", () => saveEditor(false));
+  $("edSaveMore").addEventListener("click", () => saveEditor(true));
+  $("edDelete").addEventListener("click", () => {
+    const card = editing;
+    closeEditor();
+    ask("Supprimer ce carton ?", `« ${card.name} » sera effacé définitivement.`, "Supprimer", () => {
+      state.cards = state.cards.filter((c) => c.id !== card.id);
+      render(); persist(); toast("Carton supprimé");
+    });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("confirm").hidden) closeConfirm();
+    else if (!$("editor").hidden) closeEditor();
+  });
+  [$("editor"), $("confirm")].forEach((o) => o.addEventListener("click", (e) => {
+    if (e.target === o) { o === $("editor") ? closeEditor() : closeConfirm(); }
+  }));
+
+  $("addCard").addEventListener("click", () => openEditor());
+  $("exportBtn").addEventListener("click", exportCards);
+  $("importBtn").addEventListener("click", () => $("importFile").click());
+  $("importFile").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) importCards(f);
+    e.target.value = "";
+  });
+
+  // ---------- Tri ----------
+  function setSort(m) {
+    sortMode = m;
+    $("sortAdd").setAttribute("aria-pressed", m === "add");
+    $("sortBest").setAttribute("aria-pressed", m === "best");
+    try { localStorage.setItem(LS_SORT, m); } catch (e) {}
+    render();
+  }
+  $("sortAdd").addEventListener("click", () => setSort("add"));
+  $("sortBest").addEventListener("click", () => setSort("best"));
+  try { if (localStorage.getItem(LS_SORT) === "best") { sortMode = "best"; $("sortAdd").setAttribute("aria-pressed", false); $("sortBest").setAttribute("aria-pressed", true); } } catch (e) {}
+
+  // ---------- Notifications ----------
+  function toast(text, kind = "", ms = 2600) {
+    const t = document.createElement("div");
+    t.className = "toast " + kind;
+    t.textContent = text;
+    $("toasts").appendChild(t);
+    setTimeout(() => t.remove(), ms);
+  }
+
+  render();
+  connect();
+})();
+</script>
+</body>
+</html>
