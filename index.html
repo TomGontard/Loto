@@ -165,6 +165,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .carton-name { font-family: var(--font-display); font-size: 16px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .carton-edit { border: 0; background: rgba(0,0,0,.08); color: var(--ink); border-radius: 8px; padding: 4px 9px; font-size: 12px; font-weight: 700; flex: none; }
 .carton-edit:hover { background: rgba(0,0,0,.16); }
+.carton-btns { display: flex; gap: 4px; flex: none; }
+.carton.off { filter: grayscale(.85); opacity: .55; }
+.carton.off .cell.hit::after { opacity: .5; }
 .cells { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; background: rgba(0,0,0,.55); border: 2px solid rgba(0,0,0,.55); border-radius: 4px; overflow: hidden; }
 .cell { aspect-ratio: 1 / 1.08; background: #fffdf7; display: grid; place-items: center; font-family: var(--font-display); font-size: 6.4cqi; color: var(--ink); position: relative; font-variant-numeric: tabular-nums; }
 .cell.blank { background: color-mix(in srgb, var(--stock) 80%, #000 6%); background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.06) 4px 5px); }
@@ -394,7 +397,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       let data;
       try { data = JSON.parse(reader.result); } catch (e) { data = null; }
       if (!isValidState(data)) { toast("Ce fichier n'est pas une sauvegarde de cartons valide."); return; }
-      const cards = data.cards.map((c, i) => ({ id: c.id || uid(), name: String(c.name || "Carton " + (i + 1)), color: COLORS.includes(c.color) ? c.color : COLORS[i % COLORS.length], rows: c.rows }));
+      const cards = data.cards.map((c, i) => ({ id: c.id || uid(), name: String(c.name || "Carton " + (i + 1)), color: COLORS.includes(c.color) ? c.color : COLORS[i % COLORS.length], rows: c.rows, ...(c.off ? { off: true } : {}) }));
       ask("Importer ces cartons ?",
         `Le fichier contient ${cards.length} carton${cards.length > 1 ? "s" : ""}. Ils remplaceront les ${state.cards.length} cartons actuels de cet appareil.`,
         "Importer",
@@ -473,12 +476,22 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     name.textContent = card.name || "Carton";
     top.appendChild(name);
     if (!opts.preview) {
+      const btns = document.createElement("div");
+      btns.className = "carton-btns";
+      const off = document.createElement("button");
+      off.type = "button";
+      off.className = "carton-edit";
+      off.textContent = card.off ? "Réactiver" : "Désactiver";
+      off.setAttribute("aria-label", `${card.off ? "Réactiver" : "Désactiver"} ${card.name || "le carton"}`);
+      off.addEventListener("click", () => toggleOff(card));
       const b = document.createElement("button");
       b.type = "button";
       b.className = "carton-edit";
       b.textContent = "Modifier";
       b.addEventListener("click", () => openEditor(card));
-      top.appendChild(b);
+      btns.append(off, b);
+      top.appendChild(btns);
+      if (card.off) el.classList.add("off");
     }
     el.appendChild(top);
 
@@ -513,7 +526,10 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
         left.textContent = `${p.hits} / ${p.total} jetons`;
       }
       const right = document.createElement("span");
-      if (p.level < 3 && p.near) {
+      if (card.off) {
+        right.className = "near";
+        right.textContent = "Désactivé · plus d'annonces";
+      } else if (p.level < 3 && p.near) {
         right.className = "near" + (p.near === 1 ? " hot" : "");
         right.textContent = p.near === 1 ? "Plus qu'un pour " + LEVELS[p.level + 1].toLowerCase() + " !" : `Il en manque ${p.near} sur une ligne`;
       } else if (p.level === 3) {
@@ -567,7 +583,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     // Cartons
     const list = state.cards.map((c, i) => ({ c, i, p: cardProgress(c, drawnSet) }));
     if (sortMode === "best") {
-      list.sort((a, b) => b.p.level - a.p.level || a.p.near - b.p.near || b.p.hits - a.p.hits || a.i - b.i);
+      list.sort((a, b) => !!a.c.off - !!b.c.off || b.p.level - a.p.level || a.p.near - b.p.near || b.p.hits - a.p.hits || a.i - b.i);
     }
     const box = $("cards");
     if (!state.cards.length) {
@@ -585,18 +601,21 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     $("cardsTitle").textContent = state.cards.length ? `${state.cards.length} carton${state.cards.length > 1 ? "s" : ""}` : "Cartons";
     const sum = $("summary");
     const counts = [0, 0, 0, 0]; let oneAway = 0;
-    list.forEach(({ p }) => { counts[p.level]++; if (p.level < 3 && p.near === 1) oneAway++; });
+    list.forEach(({ c, p }) => { if (c.off) return; counts[p.level]++; if (p.level < 3 && p.near === 1) oneAway++; });
     const chips = [];
     if (counts[3]) chips.push(["win", `${counts[3]} carton plein`]);
     if (counts[2]) chips.push(["win", `${counts[2]} double quine`]);
     if (counts[1]) chips.push(["win", `${counts[1]} quine`]);
     if (oneAway) chips.push(["warn", `${oneAway} à un numéro`]);
-    if (!chips.length && state.cards.length) chips.push(["", state.drawn.length ? "Pas encore de quine" : "En attente du premier numéro"]);
+    const offCount = state.cards.filter((c) => c.off).length;
+    if (offCount) chips.push(["", `${offCount} désactivé${offCount > 1 ? "s" : ""}`]);
+    if (!chips.some(([k]) => k) && state.cards.some((c) => !c.off)) chips.unshift(["", state.drawn.length ? "Pas encore de quine" : "En attente du premier numéro"]);
     sum.replaceChildren(...chips.map(([k, t]) => { const s = document.createElement("span"); s.className = "chip " + k; s.textContent = t; return s; }));
 
     // Récap global : cartons à un numéro de la prochaine étape (avec le numéro attendu), puis gains déjà faits
     const near = { 1: [], 2: [], 3: [] }, won = { 1: [], 2: [], 3: [] };
     state.cards.forEach((c) => {
+      if (c.off) return;
       const p = cardProgress(c, drawnSet);
       const name = c.name || "Carton";
       if (p.level) won[p.level].push(name);
@@ -646,7 +665,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   // ---------- Tirage ----------
   function levels() {
     const set = new Set(state.drawn);
-    return new Map(state.cards.map((c) => [c.id, cardProgress(c, set).level]));
+    return new Map(state.cards.filter((c) => !c.off).map((c) => [c.id, cardProgress(c, set).level]));
   }
   function announceWins(before) {
     const after = levels();
@@ -660,6 +679,15 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
         });
       }
     });
+  }
+
+  // Un carton désactivé (ex. déjà gagnant) reste affiché mais n'est plus annoncé ni compté dans le récap
+  function toggleOff(card) {
+    const c = state.cards.find((x) => x.id === card.id);
+    if (!c) return;
+    if (c.off) delete c.off; else c.off = true;
+    render(); persist();
+    toast(`${c.name || "Carton"} ${c.off ? "désactivé" : "réactivé"}`);
   }
 
   function setMsg(text, bad) {
@@ -682,14 +710,14 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       // Pour chaque numéro : combien de jetons posés, sur quels cartons, et les quines gagnées
       const set = new Set(state.drawn.filter((n) => !added.includes(n)));
       const lines = added.map((n) => {
-        const hit = state.cards.filter((c) => c.rows.some((r) => r.includes(n)));
+        const hit = state.cards.filter((c) => !c.off && c.rows.some((r) => r.includes(n)));
         const lvBefore = hit.map((c) => cardProgress(c, set).level);
         set.add(n);
         const names = hit.map((c, i) => {
           const lv = cardProgress(c, set).level;
           return (c.name || "Carton") + (lv > lvBefore[i] ? ` → ${LEVELS[lv].toUpperCase()} !` : "");
         });
-        if (!names.length) return `${n} : aucun jeton, absent de vos cartons`;
+        if (!names.length) return `${n} : aucun jeton, ` + (state.cards.some((c) => c.rows.some((r) => r.includes(n))) ? "seulement sur des cartons désactivés" : "absent de vos cartons");
         return `${n} : ${names.length} jeton${names.length > 1 ? "s" : ""} placé${names.length > 1 ? "s" : ""} · ${names.join(", ")}`;
       });
       setMsg(lines.join("\n"));
@@ -762,9 +790,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 
   $("newGame").addEventListener("click", () => ask(
     "Commencer une nouvelle partie ?",
-    `Les ${state.drawn.length} numéros sortis et tous les jetons seront retirés. Vos cartons restent enregistrés.`,
+    `Les ${state.drawn.length} numéros sortis et tous les jetons seront retirés. Vos cartons restent enregistrés et ceux désactivés sont réactivés.`,
     "Oui, nouvelle partie",
-    () => { state.drawn = []; justDrawn = null; render(); persist(); setMsg("Nouvelle partie : les cartons sont vides."); toast("Nouvelle partie prête"); }
+    () => { state.drawn = []; state.cards.forEach((c) => { delete c.off; }); justDrawn = null; render(); persist(); setMsg("Nouvelle partie : les cartons sont vides et tous réactivés."); toast("Nouvelle partie prête"); }
   ));
   $("clearCards").addEventListener("click", () => ask(
     "Supprimer tous les cartons ?",
