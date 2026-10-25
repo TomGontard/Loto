@@ -126,7 +126,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .entry input { flex: 1; min-width: 0; border: 2px solid var(--line); border-radius: 12px; background: var(--felt); padding: 10px 14px; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .entry input:focus { border-color: var(--accent); outline: none; }
 .entry .btn { font-size: 16px; }
-.msg { min-height: 20px; font-size: 13px; color: var(--muted); }
+.msg { min-height: 20px; font-size: 13px; color: var(--muted); white-space: pre-line; }
 .msg.bad { color: var(--accent); font-weight: 600; }
 
 .board { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 3px; }
@@ -623,14 +623,19 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     if (added.length) {
       justDrawn = added[added.length - 1];
       render(); persist(); announceWins(before);
-      const onCards = added.filter((n) => state.cards.some((c) => c.rows.some((r) => r.includes(n))));
-      setMsg(`${added.join(", ")} placé${added.length > 1 ? "s" : ""}` + (onCards.length ? ` · sur vos cartons : ${onCards.join(", ")}` : " · sur aucun carton"));
+      // Pour chaque numéro : combien de jetons posés, et sur quels cartons
+      const lines = added.map((n) => {
+        const names = state.cards.filter((c) => c.rows.some((r) => r.includes(n))).map((c) => c.name || "Carton");
+        if (!names.length) return `${n} : aucun jeton, absent de vos cartons`;
+        return `${n} : ${names.length} jeton${names.length > 1 ? "s" : ""} placé${names.length > 1 ? "s" : ""} · ${names.join(", ")}`;
+      });
+      setMsg(lines.join("\n"));
     }
     if (dup.length || bad.length) {
       const parts = [];
       if (dup.length) parts.push(`${dup.join(", ")} déjà sorti${dup.length > 1 ? "s" : ""}`);
       if (bad.length) parts.push(`${bad.join(", ")} hors de 1 à 90`);
-      setMsg((added.length ? $("msg").textContent + " · " : "") + parts.join(" · "), true);
+      setMsg((added.length ? $("msg").textContent + "\n" : "") + parts.join(" · "), true);
     }
   }
 
