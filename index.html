@@ -189,6 +189,19 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .overlay { position: fixed; inset: 0; background: rgba(5, 15, 10, .55); display: grid; place-items: center; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); z-index: 50; }
 .modal { background: var(--panel); color: var(--fg); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.4); width: min(640px, 100%); max-height: 100%; overflow: auto; padding: 22px; display: grid; gap: 16px; }
 .modal.small { width: min(440px, 100%); }
+.stat-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.stat-tile { background: var(--felt); border-radius: 10px; padding: 10px; display: grid; gap: 2px; }
+.stat-tile b { font-family: var(--font-display); font-weight: 400; font-size: 24px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat-tile span { font-size: 12px; color: var(--muted); }
+.heat { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 3px; }
+.heat div { aspect-ratio: 1; border-radius: 6px; display: grid; place-items: center; align-content: center; line-height: 1.05; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--accent) calc(var(--k) * 100%), var(--felt)); color: var(--fg); }
+.heat div.dark { color: var(--accent-fg); }
+.heat small { font-size: 10px; font-weight: 600; opacity: .8; }
+.stat-list { margin: 0; color: var(--fg); font-size: 14px; }
+.stat-list b { font-variant-numeric: tabular-nums; }
+.stat-legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.stat-legend i { width: 80px; height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--felt), var(--accent)); border: 1px solid var(--line); }
 .modal h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 24px; }
 .modal p { margin: 0; color: var(--muted); }
 .modal-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
@@ -234,6 +247,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       <button class="btn primary" id="addCard" type="button">+ Ajouter un carton</button>
       <button class="btn" id="newGame" type="button">Nouvelle partie</button>
       <button class="btn danger" id="clearCards" type="button">Supprimer les cartons</button>
+      <button class="btn" id="statsBtn" type="button">Statistiques</button>
       <button class="btn ghost" id="exportBtn" type="button">Exporter</button>
       <button class="btn ghost" id="importBtn" type="button">Importer</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
@@ -336,6 +350,28 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   </div>
 </div>
 
+<div class="overlay" id="stats" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="stTitle">
+    <h2 id="stTitle">Statistiques de la journée</h2>
+    <p id="stSince"></p>
+    <div class="stat-tiles" id="stTiles"></div>
+    <div class="field">
+      <span class="label">Sorties par numéro</span>
+      <div class="heat" id="stHeat"></div>
+      <div class="stat-legend">jamais <i></i> le plus souvent</div>
+    </div>
+    <div class="field">
+      <span class="label">En bref</span>
+      <div class="stat-list" id="stList"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn danger" type="button" id="newDay">Nouvelle journée</button>
+      <span class="spacer"></span>
+      <button class="btn primary" type="button" id="stClose">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="confirm" hidden>
   <div class="modal small" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle" aria-describedby="cfText">
     <h2 id="cfTitle"></h2>
@@ -357,7 +393,16 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   const LS_SORT = "loto-sort";
   const $ = (id) => document.getElementById(id);
 
-  let state = { cards: [], drawn: [] };
+  let state = { cards: [], drawn: [], day: newDay() };
+  // Journée de statistiques : parties terminées (numéros sortis, dans l'ordre) ; la partie en cours est state.drawn
+  function newDay() { return { start: new Date().toISOString(), games: [] }; }
+  function ensureDay() {
+    if (!state.day || !Array.isArray(state.day.games)) state.day = newDay();
+  }
+  function archiveGame() {
+    ensureDay();
+    if (state.drawn.length) state.day.games.push({ end: new Date().toISOString(), drawn: state.drawn.slice() });
+  }
   let sortMode = "add";
   let justDrawn = null;
 
@@ -384,14 +429,14 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   }
   function connect() {
     const local = loadLocal();
-    if (local) { state = local; render(); }
+    if (local) { state = local; ensureDay(); render(); }
     try { localStorage.setItem(LS_KEY + "-test", "1"); localStorage.removeItem(LS_KEY + "-test"); setSync("ok", "Enregistré sur cet appareil"); }
     catch (e) { setSync("err", "Enregistrement impossible (navigation privée ?)"); }
     // Garde plusieurs onglets du même appareil d'accord
     window.addEventListener("storage", (e) => {
       if (e.key !== LS_KEY) return;
       const s = loadLocal();
-      if (s) { state = s; justDrawn = null; render(); }
+      if (s) { state = s; ensureDay(); justDrawn = null; render(); if (!$("stats").hidden) renderStats(); }
     });
   }
 
@@ -828,15 +873,15 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 
   $("newGame").addEventListener("click", () => ask(
     "Commencer une nouvelle partie ?",
-    `Les ${state.drawn.length} numéros sortis et tous les jetons seront retirés. Vos cartons restent enregistrés et ceux désactivés sont réactivés.`,
+    `Les ${state.drawn.length} numéros sortis et tous les jetons seront retirés (ils restent comptés dans les statistiques de la journée). Vos cartons restent enregistrés et ceux désactivés sont réactivés.`,
     "Oui, nouvelle partie",
-    () => { state.drawn = []; state.cards.forEach((c) => { delete c.off; }); justDrawn = null; render(); persist(); setMsg("Nouvelle partie : les cartons sont vides et tous réactivés."); toast("Nouvelle partie prête"); }
+    () => { archiveGame(); state.drawn = []; state.cards.forEach((c) => { delete c.off; }); justDrawn = null; render(); persist(); setMsg("Nouvelle partie : les cartons sont vides et tous réactivés."); toast("Nouvelle partie prête"); }
   ));
   $("clearCards").addEventListener("click", () => ask(
     "Supprimer tous les cartons ?",
     `Les ${state.cards.length} cartons enregistrés seront effacés, ainsi que les numéros sortis. Cette action est définitive.`,
     "Tout supprimer",
-    () => { state.cards = []; state.drawn = []; justDrawn = null; render(); persist(); toast("Cartons supprimés"); }
+    () => { archiveGame(); state.cards = []; state.drawn = []; justDrawn = null; render(); persist(); toast("Cartons supprimés"); }
   ));
 
   // ---------- Éditeur ----------
@@ -919,10 +964,80 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     if (e.key !== "Escape") return;
     if (!$("confirm").hidden) closeConfirm();
     else if (!$("editor").hidden) closeEditor();
+    else if (!$("stats").hidden) $("stats").hidden = true;
   });
-  [$("editor"), $("confirm")].forEach((o) => o.addEventListener("click", (e) => {
-    if (e.target === o) { o === $("editor") ? closeEditor() : closeConfirm(); }
+  [$("editor"), $("confirm"), $("stats")].forEach((o) => o.addEventListener("click", (e) => {
+    if (e.target === o) { o === $("editor") ? closeEditor() : o === $("stats") ? ($("stats").hidden = true) : closeConfirm(); }
   }));
+
+  // ---------- Statistiques de la journée ----------
+  function renderStats() {
+    ensureDay();
+    const games = state.day.games.map((g) => g.drawn);
+    if (state.drawn.length) games.push(state.drawn);
+    const counts = Array(91).fill(0);
+    games.forEach((g) => g.forEach((n) => { counts[n]++; }));
+    const total = games.reduce((s, g) => s + g.length, 0);
+    const max = Math.max(1, ...counts);
+    const start = new Date(state.day.start);
+    $("stSince").textContent = `Depuis le ${start.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} à ${start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` +
+      (state.drawn.length ? " · partie en cours incluse" : "");
+
+    const tiles = [
+      [games.length, games.length > 1 ? "parties" : "partie"],
+      [total, "numéros tirés"],
+      [games.length ? Math.round(total / games.length) : 0, "numéros par partie en moyenne"],
+    ];
+    $("stTiles").replaceChildren(...tiles.map(([v, t]) => {
+      const d = document.createElement("div"); d.className = "stat-tile";
+      const b = document.createElement("b"); b.textContent = v;
+      const sp = document.createElement("span"); sp.textContent = t;
+      d.append(b, sp); return d;
+    }));
+
+    const heat = [];
+    for (let n = 1; n <= 90; n++) {
+      const d = document.createElement("div"), k = counts[n] / max;
+      d.style.setProperty("--k", k.toFixed(3));
+      if (k > .55) d.className = "dark";
+      d.textContent = n;
+      const sm = document.createElement("small"); sm.textContent = counts[n] ? "×" + counts[n] : "–";
+      d.append(sm);
+      d.title = `${n} : sorti ${counts[n]} fois`;
+      heat.push(d);
+    }
+    $("stHeat").replaceChildren(...heat);
+
+    const lines = [];
+    const line = (label, value) => { const p = document.createElement("p"); p.style.margin = "4px 0"; const b = document.createElement("b"); b.textContent = label + " : "; p.append(b, value); lines.push(p); };
+    if (total) {
+      const order = [...Array(90).keys()].map((i) => i + 1).sort((a, b) => counts[b] - counts[a] || a - b);
+      const top = order.filter((n) => counts[n] === counts[order[0]]);
+      line("Le plus sorti", `${top.slice(0, 10).join(", ")}${top.length > 10 ? "…" : ""} (${counts[order[0]]} fois)`);
+      const never = order.filter((n) => !counts[n]);
+      line("Jamais sortis", never.length ? `${never.length} numéro${never.length > 1 ? "s" : ""}${never.length <= 20 ? " : " + never.join(", ") : ""}` : "aucun, tous sont sortis au moins une fois");
+      const tens = Array(9).fill(0);
+      counts.forEach((c, n) => { if (n) tens[colOf(n)] += c; });
+      line("Par dizaine", tens.map((c, i) => `${i === 0 ? "1‑9" : i * 10 + "‑" + (i === 8 ? 90 : i * 10 + 9)} : ${c}`).join(" · "));
+      line("Durée des parties", games.map((g, i) => `n°${i + 1} : ${g.length}${i === games.length - 1 && state.drawn.length ? " (en cours)" : ""}`).join(" · "));
+    } else {
+      const p = document.createElement("p"); p.style.margin = "0"; p.style.color = "var(--muted)";
+      p.textContent = "Aucun numéro tiré aujourd'hui pour l'instant. Les numéros de chaque partie s'ajoutent ici, même après « Nouvelle partie ».";
+      lines.push(p);
+    }
+    $("stList").replaceChildren(...lines);
+  }
+  $("statsBtn").addEventListener("click", () => { renderStats(); $("stats").hidden = false; $("stClose").focus(); });
+  $("stClose").addEventListener("click", () => { $("stats").hidden = true; });
+  $("newDay").addEventListener("click", () => ask(
+    "Commencer une nouvelle journée ?",
+    "Les statistiques repartent de zéro et la partie en cours est remise à zéro (numéros sortis retirés, cartons réactivés). Vos cartons restent enregistrés.",
+    "Oui, nouvelle journée",
+    () => {
+      state.day = newDay(); state.drawn = []; state.cards.forEach((c) => { delete c.off; }); justDrawn = null;
+      render(); persist(); renderStats(); setMsg("Nouvelle journée : statistiques remises à zéro."); toast("Nouvelle journée commencée");
+    }
+  ));
 
   $("addCard").addEventListener("click", () => openEditor());
   $("exportBtn").addEventListener("click", exportCards);
