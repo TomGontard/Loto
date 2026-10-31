@@ -11,7 +11,7 @@ Site : https://tomgontard.github.io/Loto/
 - Tapez les numéros annoncés : les jetons se placent tout seuls sur les cartons. Quines, doubles quines et cartons pleins sont signalés.
 - Le tableau de 1 à 90 permet de corriger d'un clic. « Annuler le dernier » retire le dernier numéro, « Plus avancés » trie les cartons.
 - « Nouvelle partie » efface les numéros sortis et garde les cartons. « Supprimer les cartons » efface tout.
-- « Exporter » et « Importer » sauvegardent ou restaurent vos cartons dans un fichier JSON.
+- « Exporter » sauvegarde vos cartons dans un fichier JSON. « Importer » ajoute les cartons d'un fichier à ceux de l'appareil, sans doublons.
 
 ## Données
 

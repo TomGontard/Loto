@@ -417,11 +417,25 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       let data;
       try { data = JSON.parse(reader.result); } catch (e) { data = null; }
       if (!isValidState(data)) { toast("Ce fichier n'est pas une sauvegarde de cartons valide."); return; }
-      const cards = data.cards.map((c, i) => ({ id: c.id || uid(), name: String(c.name || "Carton " + (i + 1)), color: COLORS.includes(c.color) ? c.color : COLORS[i % COLORS.length], rows: c.rows, ...(c.off ? { off: true } : {}) }));
+      // Les cartons importés s'ajoutent à ceux de l'appareil ; un carton aux numéros identiques à un carton déjà présent est ignoré
+      const key = (c) => c.rows.map((r) => r.slice().sort((a, b) => a - b).join(" ")).join("|");
+      const have = new Set(state.cards.map(key)), ids = new Set(state.cards.map((c) => c.id));
+      const cards = [];
+      data.cards.forEach((c, i) => {
+        const k = key(c);
+        if (have.has(k)) return;
+        have.add(k);
+        const id = c.id && !ids.has(c.id) ? c.id : uid();
+        ids.add(id);
+        cards.push({ id, name: String(c.name || "Carton " + (state.cards.length + cards.length + 1)), color: COLORS.includes(c.color) ? c.color : COLORS[(state.cards.length + cards.length) % COLORS.length], rows: c.rows });
+      });
+      const dup = data.cards.length - cards.length;
+      const dupText = dup ? ` ${dup} carton${dup > 1 ? "s" : ""} déjà présent${dup > 1 ? "s" : ""} ser${dup > 1 ? "ont ignorés" : "a ignoré"}.` : "";
+      if (!cards.length) { toast(`Tous les cartons de ce fichier sont déjà sur cet appareil.`); return; }
       ask("Importer ces cartons ?",
-        `Le fichier contient ${cards.length} carton${cards.length > 1 ? "s" : ""}. Ils remplaceront les ${state.cards.length} cartons actuels de cet appareil.`,
-        "Importer",
-        () => { state = { cards, drawn: data.drawn.slice() }; justDrawn = null; render(); persist(); toast("Cartons importés"); });
+        `${cards.length} carton${cards.length > 1 ? "s" : ""} ser${cards.length > 1 ? "ont ajoutés" : "a ajouté"} ${state.cards.length === 1 ? "au carton" : `aux ${state.cards.length} cartons`} de cet appareil.${dupText} Vos cartons et les numéros sortis ne changent pas.`,
+        "Ajouter",
+        () => { state.cards.push(...cards); render(); persist(); toast(`${cards.length} carton${cards.length > 1 ? "s" : ""} ajouté${cards.length > 1 ? "s" : ""}`); });
     };
     reader.readAsText(file);
   }
