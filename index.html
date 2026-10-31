@@ -175,6 +175,10 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .cell.just::after { box-shadow: inset 0 0 0 2px var(--token-ring), 0 0 0 3px #fff, 0 0 0 5px var(--token-ring); }
 @keyframes drop { from { transform: scale(1.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .row-done .cell:not(.blank) { background: #fff3c4; }
+.carton.out { filter: grayscale(.6); opacity: .6; }
+.badge.ok { background: var(--win); }
+.mode-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.mode-hint { font-size: 12px; color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 6px 10px; margin: 0; }
 .carton-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 7px; padding-inline: 2px; font-size: 12px; font-weight: 600; min-height: 22px; }
 .badge { padding: 2px 9px; border-radius: 999px; font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; background: var(--ink); color: #fff; }
 .badge.full { background: #b3261e; }
@@ -264,6 +268,15 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
           <div class="recent" id="recent"></div>
         </div>
       </div>
+
+      <div class="mode-row">
+        <span class="label">Partie</span>
+        <div class="seg" role="group" aria-label="Type de partie">
+          <button type="button" id="modeNormal" aria-pressed="true">Normale</button>
+          <button type="button" id="modeInverse" aria-pressed="false">Inversée</button>
+        </div>
+      </div>
+      <p class="mode-hint" id="modeHint" hidden>Partie inversée : un carton est éliminé dès qu'un de ses numéros sort. Le dernier carton encore en jeu gagne.</p>
 
       <form class="entry" id="entryForm" autocomplete="off">
         <input id="numIn" type="text" inputmode="numeric" placeholder="Numéro annoncé" aria-label="Numéro annoncé">
@@ -401,7 +414,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   }
   function archiveGame() {
     ensureDay();
-    if (state.drawn.length) state.day.games.push({ end: new Date().toISOString(), drawn: state.drawn.slice() });
+    if (state.drawn.length) state.day.games.push({ end: new Date().toISOString(), drawn: state.drawn.slice(), ...(isInverse() ? { mode: "inverse" } : {}) });
   }
   let sortMode = "add";
   let justDrawn = null;
@@ -588,7 +601,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
           if (drawnSet.has(n)) c.classList.add("hit");
           if (n === justDrawn) c.classList.add("just");
           if (opts.flag && opts.flag.has(n)) c.classList.add("flag");
-          if (p.rows[ri].done) c.style.background = "#fff3c4";
+          if (p.rows[ri].done && !(isInverse() && !opts.preview)) c.style.background = "#fff3c4";
         }
         cells.appendChild(c);
       });
@@ -599,7 +612,12 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       const foot = document.createElement("div");
       foot.className = "carton-foot";
       const left = document.createElement("span");
-      if (p.level) {
+      const killer = isInverse() && !card.off ? killerOf(card) : undefined;
+      if (isInverse() && !card.off) {
+        left.className = "badge " + (killer ? "full" : "ok");
+        left.textContent = killer ? "Éliminé" : "En jeu";
+        if (killer) el.classList.add("out");
+      } else if (p.level) {
         left.className = "badge" + (p.level === 3 ? " full" : "");
         left.textContent = LEVELS[p.level];
       } else {
@@ -609,6 +627,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       if (card.off) {
         right.className = "near";
         right.textContent = "Désactivé · plus d'annonces";
+      } else if (isInverse()) {
+        right.className = "near" + (killer ? " hot" : "");
+        right.textContent = killer ? `par le ${killer}` : `${p.total} numéros à éviter`;
       } else if (p.level < 3 && p.near) {
         right.className = "near" + (p.near === 1 ? " hot" : "");
         right.textContent = p.near === 1 ? "Plus qu'un pour " + LEVELS[p.level + 1].toLowerCase() + " !" : `Il en manque ${p.near} sur une ligne`;
@@ -626,6 +647,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     const drawnSet = new Set(state.drawn);
     const last = state.drawn[state.drawn.length - 1];
 
+    $("modeNormal").setAttribute("aria-pressed", !isInverse());
+    $("modeInverse").setAttribute("aria-pressed", isInverse());
+    $("modeHint").hidden = !isInverse();
     const ball = $("ball");
     const prev = ball.textContent;
     ball.textContent = last ?? "–";
@@ -662,7 +686,9 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 
     // Cartons
     const list = state.cards.map((c, i) => ({ c, i, p: cardProgress(c, drawnSet) }));
-    if (sortMode === "best") {
+    if (sortMode === "best" && isInverse()) {
+      list.sort((a, b) => !!a.c.off - !!b.c.off || (killerOf(a.c) !== undefined) - (killerOf(b.c) !== undefined) || a.i - b.i);
+    } else if (sortMode === "best") {
       list.sort((a, b) => !!a.c.off - !!b.c.off || b.p.level - a.p.level || a.p.near - b.p.near || b.p.hits - a.p.hits || a.i - b.i);
     } else if (sortMode === "name") {
       // Tri alphabétique « naturel » : Carton 2 avant Carton 10
@@ -686,13 +712,22 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     const counts = [0, 0, 0, 0]; let oneAway = 0;
     list.forEach(({ c, p }) => { if (c.off) return; counts[p.level]++; if (p.level < 3 && p.near === 1) oneAway++; });
     const chips = [];
+    const active = state.cards.filter((c) => !c.off), alive = active.filter((c) => killerOf(c) === undefined);
+    if (isInverse()) {
+      chips.push(["", "Partie inversée"]);
+      if (active.length) {
+        if (alive.length) chips.push(["win", `${alive.length} en jeu`]);
+        if (active.length - alive.length) chips.push(["warn", alive.length ? `${active.length - alive.length} éliminé${active.length - alive.length > 1 ? "s" : ""}` : "Tous éliminés"]);
+      }
+    } else {
     if (counts[3]) chips.push(["win", `${counts[3]} carton plein`]);
     if (counts[2]) chips.push(["win", `${counts[2]} double quine`]);
     if (counts[1]) chips.push(["win", `${counts[1]} quine`]);
     if (oneAway) chips.push(["warn", `${oneAway} à un numéro`]);
+    }
     const offCount = state.cards.filter((c) => c.off).length;
     if (offCount) chips.push(["", `${offCount} désactivé${offCount > 1 ? "s" : ""}`]);
-    if (!chips.some(([k]) => k) && state.cards.some((c) => !c.off)) chips.unshift(["", state.drawn.length ? "Pas encore de quine" : "En attente du premier numéro"]);
+    if (!isInverse() && !chips.some(([k]) => k) && state.cards.some((c) => !c.off)) chips.unshift(["", state.drawn.length ? "Pas encore de quine" : "En attente du premier numéro"]);
     sum.replaceChildren(...chips.map(([k, t]) => { const s = document.createElement("span"); s.className = "chip " + k; s.textContent = t; return s; }));
 
     // Récap global : cartons à un numéro de la prochaine étape (avec le numéro attendu), puis gains déjà faits
@@ -732,6 +767,19 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       d.textContent = won[lv].join(", ");
       group("win", `${LEVELS[lv]} (${won[lv].length})`, [d]);
     });
+    if (isInverse()) {
+      // En partie inversée, le récap montre qui reste en jeu et qui a été éliminé, et par quel numéro
+      groups.length = 0;
+      if (alive.length) {
+        const d = document.createElement("div"); d.textContent = alive.map((c) => c.name || "Carton").join(", ");
+        group("win", `En jeu (${alive.length})`, [d]);
+      }
+      const out = active.filter((c) => killerOf(c) !== undefined).sort((a, b) => state.drawn.indexOf(killerOf(b)) - state.drawn.indexOf(killerOf(a)));
+      if (out.length) group("warn", `Éliminés (${out.length})`, out.map((c) => {
+        const d = document.createElement("div"); d.append((c.name || "Carton") + " · par le ");
+        const b = document.createElement("b"); b.textContent = killerOf(c); d.append(b); return d;
+      }));
+    }
     if (!groups.length) {
       const d = document.createElement("div");
       d.textContent = state.drawn.length ? "Aucun carton à un numéro pour l'instant." : "En attente du premier numéro.";
@@ -746,11 +794,24 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   }
 
   // ---------- Tirage ----------
+  // ---------- Partie inversée ----------
+  const isInverse = () => state.mode === "inverse";
+  // Premier numéro sorti présent sur le carton : celui qui l'élimine en partie inversée
+  const killerOf = (card) => state.drawn.find((n) => card.rows.some((r) => r.includes(n)));
+  function setMode(m) {
+    state.mode = m === "inverse" ? "inverse" : "normal";
+    render(); persist();
+    setMsg(isInverse() ? "Partie inversée : évitez les numéros de vos cartons !" : "Partie normale.");
+  }
+  $("modeNormal").addEventListener("click", () => { if (isInverse()) setMode("normal"); });
+  $("modeInverse").addEventListener("click", () => { if (!isInverse()) setMode("inverse"); });
+
   function levels() {
     const set = new Set(state.drawn);
     return new Map(state.cards.filter((c) => !c.off).map((c) => [c.id, cardProgress(c, set).level]));
   }
   function announceWins(before) {
+    if (isInverse()) return;
     const after = levels();
     state.cards.forEach((c) => {
       const a = after.get(c.id), b = before.get(c.id) || 0;
@@ -787,7 +848,30 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
       else if (state.drawn.includes(n)) dup.push(n);
       else { state.drawn.push(n); added.push(n); }
     });
-    if (added.length) {
+    if (added.length && isInverse()) {
+      justDrawn = added[added.length - 1];
+      render(); persist();
+      // Pour chaque numéro : quels cartons encore en jeu il élimine
+      const set = new Set(state.drawn.filter((n) => !added.includes(n)));
+      const isAlive = (c) => !c.rows.some((r) => r.some((n) => set.has(n)));
+      const out = [];
+      const lines = added.map((n) => {
+        const hit = state.cards.filter((c) => !c.off && c.rows.some((r) => r.includes(n)));
+        const fresh = hit.filter(isAlive);
+        set.add(n);
+        out.push(...fresh);
+        if (fresh.length) return `${n} : ${fresh.length} carton${fresh.length > 1 ? "s" : ""} éliminé${fresh.length > 1 ? "s" : ""} · ${fresh.map((c) => c.name || "Carton").join(", ")}`;
+        if (hit.length) return `${n} : seulement sur des cartons déjà éliminés`;
+        return `${n} : aucun de vos cartons touché`;
+      });
+      const left = state.cards.filter((c) => !c.off && killerOf(c) === undefined);
+      if (out.length) {
+        lines.push(left.length ? `Encore en jeu : ${left.length} carton${left.length > 1 ? "s" : ""}` : "Tous vos cartons sont éliminés.");
+        toast(`Éliminé${out.length > 1 ? "s" : ""} · ${out.map((c) => c.name || "Carton").join(", ")}`, "", 4000);
+        if (left.length === 1) toast(`Plus qu'un carton en jeu : ${left[0].name || "Carton"}`, "win", 6000);
+      }
+      setMsg(lines.join("\n"));
+    } else if (added.length) {
       justDrawn = added[added.length - 1];
       render(); persist(); announceWins(before);
       // Pour chaque numéro : combien de jetons posés, sur quels cartons, et les quines gagnées
