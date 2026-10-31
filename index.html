@@ -205,6 +205,13 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
 .errors { color: var(--accent); font-size: 13px; font-weight: 600; margin: 0; padding-left: 18px; }
 .errors:empty { display: none; }
 .preview-wrap { max-width: 420px; }
+.photo-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ocr-status { font-size: 13px; color: var(--muted); white-space: pre-line; }
+.ocr-status:empty { display: none; }
+.ocr-status.ok { color: var(--win); font-weight: 600; }
+.ocr-status.bad { color: var(--accent); font-weight: 600; }
+.photo-thumb { max-width: 100%; max-height: 220px; border-radius: 8px; border: 1px solid var(--line); justify-self: start; }
+.cell.flag { box-shadow: inset 0 0 0 3px #e08a00; }
 
 .toast-box { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); display: grid; gap: 8px; z-index: 60; width: min(440px, calc(100% - 32px)); }
 .toast { background: var(--fg); color: var(--felt); padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-weight: 600; animation: rise .3s ease; }
@@ -291,6 +298,18 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     <div class="field">
       <span class="label">Couleur</span>
       <div class="swatches" id="edColors"></div>
+    </div>
+    <div class="field">
+      <span class="label">Remplir depuis une photo</span>
+      <div class="photo-row">
+        <button class="btn" type="button" id="edPhoto">📷 Prendre en photo</button>
+        <button class="btn ghost" type="button" id="edPick">Choisir une image</button>
+        <input type="file" id="edPhotoFile" accept="image/*" capture="environment" hidden>
+        <input type="file" id="edPickFile" accept="image/*" hidden>
+      </div>
+      <span class="hint">Carton bien à plat, bien éclairé, cadré au plus près. La photo est lue sur ce téléphone, elle n'est envoyée nulle part.</span>
+      <div class="ocr-status" id="edOcr" aria-live="polite"></div>
+      <img class="photo-thumb" id="edThumb" alt="Photo du carton" hidden>
     </div>
     <div class="field">
       <span class="label">Numéros, ligne par ligne</span>
@@ -509,6 +528,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
           c.textContent = n;
           if (drawnSet.has(n)) c.classList.add("hit");
           if (n === justDrawn) c.classList.add("just");
+          if (opts.flag && opts.flag.has(n)) c.classList.add("flag");
           if (p.rows[ri].done) c.style.background = "#fff3c4";
         }
         cells.appendChild(c);
@@ -806,7 +826,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
   ));
 
   // ---------- Éditeur ----------
-  let editing = null, edColor = COLORS[0];
+  let editing = null, edColor = COLORS[0], edFlags = new Set();
 
   function edRows() { return [0, 1, 2].map((i) => parseRow($("edR" + i).value)); }
   function edUpdate() {
@@ -815,7 +835,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     $("edErrors").replaceChildren(...errs.map((t) => { const li = document.createElement("li"); li.textContent = t; return li; }));
     const okRows = rows.map((r) => r.filter((n) => n >= 1 && n <= 90));
     const preview = { name: $("edName").value || "Aperçu", color: edColor, rows: okRows };
-    $("edPreview").replaceChildren(cartonEl(preview, new Set(), { preview: true }));
+    $("edPreview").replaceChildren(cartonEl(preview, new Set(), { preview: true, flag: edFlags }));
     [...$("edColors").children].forEach((b) => b.setAttribute("aria-pressed", b.dataset.c === edColor));
   }
 
@@ -835,6 +855,7 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     $("edName").value = card ? card.name : `Carton ${state.cards.length + 1}`;
     edColor = card ? card.color : COLORS[state.cards.length % COLORS.length];
     [0, 1, 2].forEach((i) => { $("edR" + i).value = card ? card.rows[i].join(" ") : ""; });
+    resetPhoto();
     $("edDelete").hidden = !card;
     $("edSaveMore").hidden = !!card;
     $("editor").hidden = false;
@@ -897,6 +918,297 @@ header.top { display: flex; flex-wrap: wrap; align-items: center; justify-conten
     if (f) importCards(f);
     e.target.value = "";
   });
+
+  // ---------- Photo du carton (lecture des numéros sur l'appareil) ----------
+  // Tesseract.js n'est téléchargé qu'au premier usage, puis gardé en cache par le navigateur
+  const OCR = {
+    script: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",
+    workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
+    corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1",
+    langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int",
+  };
+  let ocrWorker = null, ocrProgress = () => {}, thumbUrl = null;
+
+  function loadScript(src) {
+    return new Promise((ok, ko) => {
+      const el = document.createElement("script");
+      el.src = src; el.onload = ok; el.onerror = () => ko(new Error("script"));
+      document.head.appendChild(el);
+    });
+  }
+  function getWorker() {
+    if (!ocrWorker) {
+      ocrWorker = (async () => {
+        if (!window.Tesseract) await loadScript(OCR.script);
+        const w = await Tesseract.createWorker("eng", 1, { workerPath: OCR.workerPath, corePath: OCR.corePath, langPath: OCR.langPath, logger: (m) => ocrProgress(m) });
+        await w.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "11", user_defined_dpi: "300" });
+        return w;
+      })();
+      ocrWorker.catch(() => { ocrWorker = null; });
+    }
+    return ocrWorker;
+  }
+
+  function loadImage(src) {
+    return new Promise((ok, ko) => { const img = new Image(); img.onload = () => ok(img); img.onerror = ko; img.src = src; });
+  }
+  // Photo réduite à 1600 px, tournée de `angle` degrés, en niveaux de gris
+  function grayOf(img, angle, max = 1600) {
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+    const quarter = Math.round(angle / 90) % 2 !== 0;
+    const cv = document.createElement("canvas");
+    cv.width = quarter ? h : w; cv.height = quarter ? w : h;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.translate(cv.width / 2, cv.height / 2);
+    ctx.rotate(angle * Math.PI / 180);
+    ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    const px = ctx.getImageData(0, 0, cv.width, cv.height).data, g = new Uint8Array(cv.width * cv.height);
+    for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+    return { g, W: cv.width, H: cv.height };
+  }
+  // Seuil local (Bradley) : 1 = encre, quelle que soit la couleur du carton ou l'éclairage
+  function binarize({ g, W, H }) {
+    const sum = new Float64Array((W + 1) * (H + 1)), r = Math.max(7, Math.round(Math.max(W, H) / 80));
+    for (let y = 0; y < H; y++) {
+      let row = 0;
+      for (let x = 0; x < W; x++) { row += g[y * W + x]; sum[(y + 1) * (W + 1) + x + 1] = sum[y * (W + 1) + x + 1] + row; }
+    }
+    const bin = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) {
+      const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+      for (let x = 0; x < W; x++) {
+        const x0 = Math.max(0, x - r), x1 = Math.min(W, x + r + 1);
+        const s = sum[y1 * (W + 1) + x1] - sum[y0 * (W + 1) + x1] - sum[y1 * (W + 1) + x0] + sum[y0 * (W + 1) + x0];
+        if (g[y * W + x] * (x1 - x0) * (y1 - y0) < s * .82) bin[y * W + x] = 1;
+      }
+    }
+    return bin;
+  }
+  // Inclinaison (en degrés) qui aligne le mieux l'encre en lignes horizontales
+  function skewOf(img, angle) {
+    const small = grayOf(img, angle, 500), { W, H } = small, bin = binarize(small);
+    const pts = [];
+    for (let i = 0; i < bin.length; i++) if (bin[i]) pts.push(i % W, (i / W) | 0);
+    const score = (deg) => {
+      const t = Math.tan(deg * Math.PI / 180), off = W, hist = new Float64Array(H + 2 * W);
+      for (let i = 0; i < pts.length; i += 2) hist[Math.round(pts[i + 1] - pts[i] * t) + off]++;
+      let s = 0;
+      for (const v of hist) s += v * v;
+      return s;
+    };
+    let best = 0, bestS = -1;
+    for (let d = -10; d <= 10; d += .5) { const s = score(d); if (s > bestS) { bestS = s; best = d; } }
+    const c = best;
+    for (let d = c - .4; d <= c + .4; d += .1) { const s = score(d); if (s > bestS) { bestS = s; best = d; } }
+    return best;
+  }
+  // Isole les chiffres du carton : lignes de la grille effacées, puis taches d'encre de même hauteur
+  // regroupées en numéros, rangés en lignes
+  function findNumbers(img, angle) {
+    const skew = skewOf(img, angle);
+    const gray = grayOf(img, angle - skew), { W, H } = gray, bin = binarize(gray);
+    const L = Math.round(Math.max(W, H) * .1), kill = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W;) {
+      if (!bin[y * W + x]) { x++; continue; }
+      const s = x; while (x < W && bin[y * W + x]) x++;
+      if (x - s > L) kill.fill(1, y * W + s, y * W + x);
+    }
+    for (let x = 0; x < W; x++) for (let y = 0; y < H;) {
+      if (!bin[y * W + x]) { y++; continue; }
+      const s = y; while (y < H && bin[y * W + x]) y++;
+      if (y - s > L) for (let k = s; k < y; k++) kill[k * W + x] = 1;
+    }
+    for (let i = 0; i < bin.length; i++) if (kill[i]) bin[i] = 0;
+
+    const label = new Int32Array(W * H), comps = [], stack = new Int32Array(W * H);
+    for (let i = 0; i < bin.length; i++) {
+      if (!bin[i] || label[i]) continue;
+      const id = comps.length + 1, c = { id, x0: W, y0: H, x1: 0, y1: 0, area: 0 };
+      let sp = 0; stack[sp++] = i; label[i] = id;
+      while (sp) {
+        const p = stack[--sp], x = p % W, y = (p / W) | 0;
+        c.area++;
+        if (x < c.x0) c.x0 = x; if (x > c.x1) c.x1 = x; if (y < c.y0) c.y0 = y; if (y > c.y1) c.y1 = y;
+        if (x > 0 && bin[p - 1] && !label[p - 1]) { label[p - 1] = id; stack[sp++] = p - 1; }
+        if (x < W - 1 && bin[p + 1] && !label[p + 1]) { label[p + 1] = id; stack[sp++] = p + 1; }
+        if (y > 0 && bin[p - W] && !label[p - W]) { label[p - W] = id; stack[sp++] = p - W; }
+        if (y < H - 1 && bin[p + W] && !label[p + W]) { label[p + W] = id; stack[sp++] = p + W; }
+      }
+      c.w = c.x1 - c.x0 + 1; c.h = c.y1 - c.y0 + 1;
+      comps.push(c);
+    }
+    const cand = comps.filter((c) => c.h >= 10 && c.h <= H * .3 && c.w <= c.h * 2.5 && c.h <= c.w * 12 && c.area > c.w * c.h * .08 && c.area < c.w * c.h * .95);
+    if (cand.length < 3) return null;
+    // Tous les chiffres imprimés ont la même hauteur. On cherche, parmi les taches étroites comme un chiffre,
+    // la hauteur qui maximise « nombre de taches × hauteur » : ni les miettes de bruit, ni quelques cadres de cases
+    const narrow = cand.filter((c) => c.w <= c.h * .9);
+    let href = 0, bestN = 0;
+    narrow.forEach((c) => { const n = narrow.filter((d) => Math.abs(d.h - c.h) <= c.h * .12).length * c.h; if (n > bestN) { bestN = n; href = c.h; } });
+    if (!href) return null;
+    const digits = cand.filter((c) => Math.abs(c.h - href) <= href * .22).sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1));
+    const rows = [];
+    digits.forEach((c, i) => {
+      if (!i || (c.y0 + c.y1) / 2 - (digits[i - 1].y0 + digits[i - 1].y1) / 2 > href * .6) rows.push([]);
+      rows[rows.length - 1].push(c);
+    });
+    const best = rows.sort((a, b) => b.length - a.length).slice(0, 3).sort((a, b) => a[0].y0 - b[0].y0);
+    const numbers = [];
+    best.forEach((r, ri) => {
+      r.sort((a, b) => a.x0 - b.x0);
+      let cur = null;
+      r.forEach((c) => {
+        if (cur && c.x0 - cur.x1 < href * .45) { cur.comps.push(c); cur.x1 = Math.max(cur.x1, c.x1); cur.y0 = Math.min(cur.y0, c.y0); cur.y1 = Math.max(cur.y1, c.y1); }
+        else { cur = { row: ri, x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, comps: [c] }; numbers.push(cur); }
+      });
+    });
+    const nums = numbers.filter((n) => n.comps.length <= 2);
+    nums.forEach((n) => { n.digits = n.comps.reduce((s, c) => s + (c.w > href * 1.15 ? 2 : 1), 0); });
+    if (!nums.length) return null;
+
+    // Image propre pour la lecture : seulement les chiffres retenus, en noir sur blanc, à ~44 px de haut
+    const keep = new Set(nums.flatMap((n) => n.comps.map((c) => c.id)));
+    const bx0 = Math.max(0, Math.min(...nums.map((n) => n.x0)) - href), by0 = Math.max(0, Math.min(...nums.map((n) => n.y0)) - href);
+    const bx1 = Math.min(W, Math.max(...nums.map((n) => n.x1)) + href), by1 = Math.min(H, Math.max(...nums.map((n) => n.y1)) + href);
+    const cw = bx1 - bx0, ch = by1 - by0, raw = new ImageData(cw, ch);
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+      const o = (y * cw + x) * 4, v = keep.has(label[(y + by0) * W + x + bx0]) ? 0 : 255;
+      raw.data[o] = raw.data[o + 1] = raw.data[o + 2] = v; raw.data[o + 3] = 255;
+    }
+    const tmp = document.createElement("canvas"); tmp.width = cw; tmp.height = ch;
+    tmp.getContext("2d").putImageData(raw, 0, 0);
+    const k = 44 / href, pad = 30, cv = document.createElement("canvas");
+    cv.width = Math.round(cw * k) + 2 * pad; cv.height = Math.round(ch * k) + 2 * pad;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(tmp, pad, pad, cw * k, ch * k);
+    nums.forEach((n) => { n.box = { x0: (n.x0 - bx0) * k + pad, x1: (n.x1 - bx0) * k + pad, y0: (n.y0 - by0) * k + pad, y1: (n.y1 - by0) * k + pad }; });
+    return { canvas: cv, nums, href: 44 };
+  }
+
+  // Lit chaque numéro isolé, vérifie sa colonne d'après sa position, range le tout en 3 lignes
+  async function readCard(w, found) {
+    const { canvas, nums, href } = found;
+    const { data } = await w.recognize(canvas);
+    const m = href * .3;
+    nums.forEach((n) => { n.chars = []; });
+    (data.symbols || []).forEach((s) => {
+      const cx = (s.bbox.x0 + s.bbox.x1) / 2, cy = (s.bbox.y0 + s.bbox.y1) / 2;
+      const n = nums.find((n) => cx >= n.box.x0 - m && cx <= n.box.x1 + m && cy >= n.box.y0 - m && cy <= n.box.y1 + m);
+      if (n && /\d/.test(s.text)) n.chars.push({ x: cx, t: s.text.replace(/\D/g, ""), conf: s.confidence });
+    });
+    const missed = nums.filter((n) => !n.chars.length);
+    if (missed.length) await w.setParameters({ tessedit_pageseg_mode: "8" });
+    for (const n of missed) {
+      // Numéro manqué : on le relit seul
+      const p = href * .6, c = document.createElement("canvas");
+      c.width = Math.round(n.box.x1 - n.box.x0 + 2 * p); c.height = Math.round(n.box.y1 - n.box.y0 + 2 * p);
+      c.getContext("2d").drawImage(canvas, n.box.x0 - p, n.box.y0 - p, c.width, c.height, 0, 0, c.width, c.height);
+      const r = await w.recognize(c);
+      (r.data.symbols || []).forEach((s) => { if (/\d/.test(s.text)) n.chars.push({ x: s.bbox.x0, t: s.text.replace(/\D/g, ""), conf: s.confidence }); });
+    }
+    if (missed.length) await w.setParameters({ tessedit_pageseg_mode: "11" });
+    const read = nums.map((n) => {
+      const txt = n.chars.sort((a, b) => a.x - b.x).map((c) => c.t).join("");
+      const v = parseInt(txt, 10);
+      // La confiance de Tesseract par chiffre est peu fiable ici ; on se fie au nombre de chiffres et à la colonne
+      const doubt = txt.length !== n.digits;
+      return { row: n.row, n: v, x: (n.x0 + n.x1) / 2, doubt, conf: Math.min(...n.chars.map((c) => c.conf), 100) };
+    }).filter((p) => p.n >= 1 && p.n <= 90);
+    if (!read.length) return null;
+
+    // Droite x = a + b·colonne, recalculée sans les points aberrants
+    const fit = (pts) => {
+      const mc = pts.reduce((s, p) => s + colOf(p.n), 0) / pts.length, mx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      let cov = 0, v = 0;
+      pts.forEach((p) => { cov += (colOf(p.n) - mc) * (p.x - mx); v += (colOf(p.n) - mc) ** 2; });
+      return v && cov > 0 ? { a: mx - cov / v * mc, b: cov / v } : null;
+    };
+    let line = read.length >= 4 ? fit(read) : null;
+    const off = (p) => Math.abs((p.x - line.a) / line.b - colOf(p.n));
+    if (line) { const good = read.filter((p) => off(p) < .6); if (good.length >= 4) line = fit(good) || line; }
+    const flags = new Set();
+    const rows = [0, 1, 2].map((ri) => {
+      const byCol = new Map();
+      read.filter((p) => p.row === ri).forEach((p) => {
+        p.bad = p.doubt || (!!line && off(p) > .6);
+        const c = colOf(p.n), cur = byCol.get(c);
+        if (!cur || (cur.bad && !p.bad) || (cur.bad === p.bad && p.conf > cur.conf)) byCol.set(c, p);
+      });
+      const kept = [...byCol.values()];
+      kept.forEach((p) => { if (p.bad) flags.add(p.n); });
+      return kept.map((p) => p.n).sort((a, b) => a - b);
+    });
+    const count = rows.reduce((s, r) => s + r.length, 0);
+    return { rows, flags, count, score: count - flags.size };
+  }
+
+  function ocrStatus(text, kind = "") {
+    const el = $("edOcr");
+    el.textContent = text;
+    el.className = "ocr-status " + kind;
+  }
+  function resetPhoto() {
+    edFlags = new Set();
+    ocrStatus("");
+    if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    thumbUrl = null;
+    $("edThumb").hidden = true;
+    $("edThumb").removeAttribute("src");
+  }
+
+  async function photoFill(file) {
+    if (!file) return;
+    resetPhoto();
+    thumbUrl = URL.createObjectURL(file);
+    $("edThumb").src = thumbUrl;
+    $("edThumb").hidden = false;
+    $("edPhoto").disabled = $("edPick").disabled = true;
+    ocrStatus("Préparation…");
+    ocrProgress = (m) => {
+      const pct = Math.round((m.progress || 0) * 100);
+      if (m.status === "recognizing text") ocrStatus(`Lecture du carton… ${pct} %`);
+      else ocrStatus(`Chargement de la lecture automatique (une seule fois)… ${pct} %`);
+    };
+    try {
+      const img = await loadImage(thumbUrl);
+      const w = await getWorker();
+      let best = null;
+      for (const angle of [0, 90, 270]) {
+        ocrStatus("Lecture du carton…");
+        const found = findNumbers(img, angle);
+        const r = found && await readCard(w, found);
+        if (r && (!best || r.score > best.score)) best = r;
+        if (best && best.score >= 12) break;
+      }
+      if ($("editor").hidden) return;
+      if (!best || best.count < 3) {
+        ocrStatus("Aucun numéro reconnu. Reprenez la photo plus près et mieux éclairée, ou saisissez à la main.", "bad");
+        return;
+      }
+      best.rows.forEach((r, i) => { $("edR" + i).value = r.join(" "); });
+      edFlags = best.flags;
+      edUpdate();
+      const notes = [`${best.count} numéros lus : comparez avec la photo avant d'enregistrer.`];
+      best.rows.forEach((r, i) => { if (r.length !== 5) notes.push(`Ligne ${i + 1} : ${r.length} numéro${r.length > 1 ? "s" : ""} au lieu de 5.`); });
+      if (best.flags.size) notes.push(`À vérifier (en orange sur l'aperçu) : ${[...best.flags].sort((a, b) => a - b).join(", ")}.`);
+      ocrStatus(notes.join("\n"), notes.length === 1 ? "ok" : "");
+    } catch (e) {
+      ocrStatus(navigator.onLine === false
+        ? "Pas de connexion : la lecture automatique doit être téléchargée une première fois."
+        : "La lecture a échoué. Réessayez ou saisissez à la main.", "bad");
+    } finally {
+      $("edPhoto").disabled = $("edPick").disabled = false;
+    }
+  }
+  $("edPhoto").addEventListener("click", () => $("edPhotoFile").click());
+  $("edPick").addEventListener("click", () => $("edPickFile").click());
+  ["edPhotoFile", "edPickFile"].forEach((id) => $(id).addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    photoFill(f);
+  }));
 
   // ---------- Tri ----------
   function setSort(m) {
